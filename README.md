@@ -53,19 +53,5 @@ python jarvis/integracoes/autenticar_google.py   # só na primeira vez
 python main.py
 ```
 
-## Arquivos que precisam ser movidos manualmente
-
-Estes arquivos existem no projeto atual mas não foram enviados junto com o
-pedido de reorganização, então não têm conteúdo aqui — só a pasta de
-destino já preparada:
-
-| Arquivo original         | Novo local                          |
-|---------------------------|--------------------------------------|
-| `identificacaodefala.py`  | `jarvis/voz/identificacaodefala.py`  |
-| `template.html`           | `jarvis/web/template.html`           |
-| `CAPACIDADES_IA.md`       | `docs/CAPACIDADES_IA.md`             |
-| `credenciais.json`        | `data/credenciais/credenciais.json`  |
-| `token.json`               | `data/credenciais/token.json`        |
-| `historico.json`          | `data/historico.json`                |
 | `.env`                    | raiz do projeto (mesmo lugar)        |
 | `teste.py`                | avaliar se ainda é necessário         |
