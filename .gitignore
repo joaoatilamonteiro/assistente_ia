@@ -1,0 +1,14 @@
+# Ambiente
+.env
+venv/
+__pycache__/
+*.pyc
+
+# Dados sensíveis / gerados
+data/historico.json
+data/credenciais/credenciais.json
+data/credenciais/token.json
+
+# IDE
+.idea/
+capturas_xournal/
