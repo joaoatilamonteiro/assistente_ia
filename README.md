@@ -52,6 +52,3 @@ pip install -r requirements.txt --break-system-packages
 python jarvis/integracoes/autenticar_google.py   # só na primeira vez
 python main.py
 ```
-
-| `.env`                    | raiz do projeto (mesmo lugar)        |
-| `teste.py`                | avaliar se ainda é necessário         |
