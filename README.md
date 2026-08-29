@@ -48,7 +48,11 @@ IA-cat/
 ## Como rodar
 
 ```bash
-pip install -r requirements.txt --break-system-packages
+python -m venv .venv
+.venv\Scripts\activate <- caso esteja no Windows
+source .venv/Scripts/actiavate <- caso esteja no Linux/MacOs
+  
+pip install -r requirements.txt
 python jarvis/integracoes/autenticar_google.py   # só na primeira vez
 python main.py
 ```
