@@ -1,4 +1,3 @@
-"""Captura da última print tirada, usada pelo comando \\print no chat."""
 from pathlib import Path
 
 

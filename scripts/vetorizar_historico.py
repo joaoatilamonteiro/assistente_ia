@@ -1,8 +1,4 @@
-"""
-Varre o data/historico.json e gera o campo "embedding" para toda mensagem
-que ainda não tiver um (ex: mensagens antigas salvas antes da memória
-vetorial existir). Rode com: python scripts/vetorizar_historico.py
-"""
+
 import sys
 import os
 

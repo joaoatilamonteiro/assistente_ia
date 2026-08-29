@@ -1,5 +1,3 @@
-"""Utilitários de texto: estimativa de tokens, corte de histórico e detecção
-de respostas corrompidas ou de recusa da IA."""
 
 
 def estimar_tokens(texto):

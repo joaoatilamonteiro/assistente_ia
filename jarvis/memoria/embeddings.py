@@ -1,5 +1,4 @@
-"""Geração de embeddings e busca semântica na memória (histórico) e em
-documentos fatiados (RAG simples)."""
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -18,29 +17,40 @@ def cos_sim(a, b):
 
 
 def buscar_memoria_semantica(pergunta, historico, top_k=3):
-    """Varre o JSON caçando as memórias com maior ligação semântica."""
-    vetor_pergunta = gerar_embedding(pergunta)
+    """Varre o histórico caçando as memórias com maior ligação semântica.
+
+    Vetorizado com numpy (uma única operação matricial) em vez de chamar
+    cos_sim mensagem por mensagem - muito mais rápido conforme o
+    historico.json cresce.
+    """
+    mensagens_com_vetor = [msg for msg in historico if msg.get("embedding")]
+    if not mensagens_com_vetor:
+        return []
+
+    vetor_pergunta = np.array(gerar_embedding(pergunta))
+    matriz_vetores = np.array([msg["embedding"] for msg in mensagens_com_vetor])
+
+    normas = np.linalg.norm(matriz_vetores, axis=1) * np.linalg.norm(vetor_pergunta)
+    normas[normas == 0] = 1e-10  # evita divisão por zero em vetores nulos
+    similaridades = (matriz_vetores @ vetor_pergunta) / normas
+
+    # Já ordenado do mais relevante pro menos relevante
+    indices_ordenados = np.argsort(similaridades)[::-1]
 
     resultados = []
-    for msg in historico:
-        vetor_msg = msg.get("embedding")
-        if not vetor_msg:
-            continue  # Pula memórias velhas que não têm vetor
-
-        similaridade = cos_sim(vetor_pergunta, vetor_msg)
-
+    for idx in indices_ordenados:
         # Só pega o que tiver pelo menos 25% de relevância semântica
-        if similaridade > 0.25:
-            resultados.append((similaridade, msg))
-    # Ordena do mais relevante para o menos relevante
-    resultados.sort(key=lambda x: x[0], reverse=True)
+        if similaridades[idx] <= 0.25:
+            break  # como já está ordenado, dá pra parar assim que cair abaixo do limiar
+        resultados.append(mensagens_com_vetor[idx])
+        if len(resultados) >= top_k:
+            break
 
-    # Retorna apenas as mensagens dos Top K resultados
-    return [res[1] for res in resultados[:top_k]]
+    return resultados
 
 
 def fatiar_e_buscar_documento(texto_gigante, pergunta_usuario, top_k=3):
-    """Fatia um texto gigante, converte em vetores na hora e acha a agulha no palheiro."""
+    """Fatia um texto gigante, converte em vetores em lote e acha a agulha no palheiro."""
 
     # 1. Chunking: Pica o texto em pedaços de 1500 caracteres (aprox. 400 tokens)
     tamanho_pedaco = 1500
@@ -49,18 +59,19 @@ def fatiar_e_buscar_documento(texto_gigante, pergunta_usuario, top_k=3):
     print(f"✂️ Documento dividido em {len(pedacos)} pedaços. Vetorizando...")
 
     # 2. Gera o vetor da pergunta
-    vetor_pergunta = gerar_embedding(pergunta_usuario)
+    vetor_pergunta = np.array(gerar_embedding(pergunta_usuario))
 
-    # 3. Busca Bruta: Compara a pergunta com CADA pedaço do texto
-    resultados = []
-    for pedaco in pedacos:
-        vetor_pedaco = gerar_embedding(pedaco)
-        similaridade = cos_sim(vetor_pergunta, vetor_pedaco)
-        resultados.append((similaridade, pedaco))
+    # 3. Vetoriza TODOS os pedaços de uma vez (batch) em vez de um a um -
+    # o modelo de embedding processa lotes muito mais rápido que chamadas soltas
+    matriz_pedacos = np.array(modelo_embedding.encode(pedacos))
+
+    normas = np.linalg.norm(matriz_pedacos, axis=1) * np.linalg.norm(vetor_pergunta)
+    normas[normas == 0] = 1e-10
+    similaridades = (matriz_pedacos @ vetor_pergunta) / normas
 
     # 4. Pega só os pedaços que mais batem com a pergunta
-    resultados.sort(key=lambda x: x[0], reverse=True)
-    melhores_pedacos = [res[1] for res in resultados[:top_k]]
+    indices_ordenados = np.argsort(similaridades)[::-1][:top_k]
+    melhores_pedacos = [pedacos[i] for i in indices_ordenados]
 
     # 5. Costura os melhores pedaços juntos
     texto_filtrado = "\n\n...[Corte]...\n\n".join(melhores_pedacos)

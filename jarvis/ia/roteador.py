@@ -1,9 +1,4 @@
-"""Roteador de comandos e compressor de memória.
 
-Usa seu próprio cliente Ollama local (client_roteador_local), separado do
-client_local usado no restante do Jarvis (jarvis.config), pra evitar
-misturar o modelo de classificação/compressão com o modelo de chat/visão.
-"""
 import json
 
 from openai import OpenAI
@@ -12,6 +7,79 @@ client_roteador_local = OpenAI(base_url="http://localhost:11434/v1", api_key="ol
 
 # Mesmo modelo usado na visão (qwen2.5vl:7b) - texto e visão no mesmo modelo.
 modelo_roteador_local = "qwen2.5vl:7b"
+
+# ==========================================
+# CLASSIFICAÇÃO RÁPIDA (SEM IA) - CUSTO ~0ms
+# ==========================================
+# interpreta_comando (mais abaixo) chama um modelo local de 7B só pra
+# classificar a frase - em CPU isso custa segundos por mensagem. A imensa
+# maioria das mensagens do dia a dia dá pra classificar por palavra-chave,
+# instantaneamente. Só cai no modelo de IA quando a heurística fica em dúvida.
+_PALAVRAS_BUSCAR_MEMORIA = [
+    "lembra", "lembrar", "lembrou", "resgata", "resgatar", "resgate",
+    "relembra", "relembrar", "antes", "anteriormente", "passado",
+    "primeira mensagem", "primeiro assunto", "continuando", "continua de onde",
+    "voltando naquele assunto", "já te falei", "ja te falei", "conversamos sobre",
+]
+
+_PALAVRAS_MATEMATICA = [
+    "equação", "equacao", "calcul", "deriv", "integral", "matemática", "matematica",
+    "álgebra", "algebra", "geometria", "trigonometria", "logaritmo",
+]
+
+_PALAVRAS_PROGRAMACAO = [
+    "código", "codigo", "python", "javascript", "typescript", "função", "funcao",
+    "bug", "compila", "programa", "script", " api ", "loop", "variável", "variavel",
+    "biblioteca", "framework", "sql", "git",
+]
+
+_PALAVRAS_TRADUCAO = [
+    "traduz", "traducao", "tradução", "translate", "em inglês", "em ingles",
+    "para o inglês", "para o ingles", "para o espanhol", "para o francês",
+]
+
+# Mensagens muito curtas (saudação, confirmação, small talk) quase nunca
+# precisam de classificação por IA - a partir desse nº de palavras a heurística
+# desiste e deixa o modelo local decidir.
+_LIMITE_PALAVRAS_MENSAGEM_CURTA = 12
+
+
+def _contem_alguma(frase_lower, palavras):
+    return any(p in frase_lower for p in palavras)
+
+
+def classificar_rapido(frase_usuario):
+    """Tenta classificar a frase sem chamar nenhum modelo de IA.
+
+    Retorna o dicionário de intenção se conseguir decidir com confiança,
+    ou None se a frase for ambígua/longa e precisar mesmo do roteador via IA.
+    """
+    frase_lower = frase_usuario.lower()
+
+    if _contem_alguma(frase_lower, _PALAVRAS_BUSCAR_MEMORIA):
+        return {"comando": "buscar_memoria", "especialidade": "geral"}
+
+    if _contem_alguma(frase_lower, _PALAVRAS_MATEMATICA):
+        return {"comando": "normal", "especialidade": "matematica"}
+    if _contem_alguma(frase_lower, _PALAVRAS_PROGRAMACAO):
+        return {"comando": "normal", "especialidade": "programacao"}
+    if _contem_alguma(frase_lower, _PALAVRAS_TRADUCAO):
+        return {"comando": "normal", "especialidade": "traducao"}
+
+    if len(frase_lower.split()) <= _LIMITE_PALAVRAS_MENSAGEM_CURTA:
+        return {"comando": "normal", "especialidade": "geral"}
+
+    return None  # ambíguo/longa demais - só aqui vale a pena chamar o modelo local
+
+
+def interpreta_comando_rapido(frase_usuario):
+    """Ponto de entrada usado pelo loop de conversa: tenta a heurística
+    instantânea primeiro e só aciona interpreta_comando (IA local) quando
+    ela não tem certeza."""
+    resultado_heuristico = classificar_rapido(frase_usuario)
+    if resultado_heuristico is not None:
+        return resultado_heuristico
+    return interpreta_comando(frase_usuario)
 
 
 def interpreta_comando(frase_usuario):
@@ -74,6 +142,10 @@ def comprime_memoria(texto_bruto):
     if not texto_bruto.strip():
         return ""
 
+    limite_caracteres = 800
+    if len(texto_bruto) <= limite_caracteres:
+        return texto_bruto.strip()
+
     prompt_sistema = (
         "Você é um compactador de informações. Leia o histórico de conversa abaixo e faça um resumo ultra conciso "
         "(máximo 2 ou 3 parágrafos) focando APENAS nos fatos, nas dúvidas do usuário, nas resoluções e nos dados técnicos. "
@@ -90,7 +162,7 @@ def comprime_memoria(texto_bruto):
                 {"role": "user", "content": f"HISTÓRICO:\n{texto_bruto}"}
             ],
             temperature=0.3,  # Baixa temperatura para ele não inventar nada
-            max_tokens=600
+            max_tokens=350
         )
         return resposta.choices[0].message.content.strip()
 

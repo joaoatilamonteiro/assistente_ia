@@ -1,4 +1,3 @@
-"""Leitura e escrita do histórico de conversas (data/historico.json)."""
 import json
 import os
 

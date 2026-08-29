@@ -1,5 +1,3 @@
-"""Leitura óptica de imagens: tenta primeiro localmente via Ollama,
-com fallback para a nuvem (Groq) se a leitura local falhar ou vier corrompida."""
 import mimetypes
 
 from jarvis.config import client_local, client, modelo_visao_local

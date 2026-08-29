@@ -1,4 +1,3 @@
-"""Cardápio de ferramentas (function calling) que a IA pode acionar."""
 
 # O novo cardápio que aceita listas
 ferramentas_jarvis = [
@@ -57,7 +56,28 @@ ferramentas_jarvis = [
                     "required": ["termo_busca"]
                 }
             }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "listar_proximos_eventos",
+            "description": "Lista os próximos eventos futuros da agenda do Google do usuário. Use quando o usuário perguntar 'quando é', 'o que tenho marcado', 'quais eventos', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "termo_busca": {
+                        "type": "string",
+                        "description": "Palavra-chave pra filtrar os eventos (ex: 'prova'). Deixe vazio pra listar todos os próximos eventos."
+                    },
+                    "dias_a_frente": {
+                        "type": "integer",
+                        "description": "Quantos dias pra frente buscar. Padrão 90 se não especificado."
+                    }
+                },
+                "required": []
+            }
         },
+    },
     {
         "type": "function",
         "function": {

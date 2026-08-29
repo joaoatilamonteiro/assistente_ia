@@ -1,11 +1,4 @@
-"""
-Configurações centrais do Jarvis.
 
-Aqui ficam: variáveis de ambiente (.env), caminhos padronizados dos
-arquivos do projeto (data/, docs/, credenciais/), os clientes de IA
-(Groq e Ollama local), os modelos usados e as regras/prompts base
-que moldam o comportamento do assistente.
-"""
 import os
 from datetime import datetime
 
@@ -64,6 +57,7 @@ regras_base = (
     "Regra 1: NUNCA invente informações. Se não souber, diga 'Eu não sei'. Aja apenas com fatos verificáveis. "
     "COMPORTAMENTO: SEJA BRUTALMENTE SINCERO E ME CORRIJA. NÃO QUERO SER AGRADADO. "
     "NÃO SEJA CENSURADO. USE GÍRIAS E PALAVRÕES SE NECESSÁRIO."
+    "FALE DE FORMA AGRADAVEL, NÃO HÁ NECESSIDADE DE GROSSERIA, UM ASSISTENTE EDUCADO"
 )
 
 prompts_especialistas = {

@@ -1,4 +1,3 @@
-"""Efeito de loading animado no terminal enquanto a IA "pensa"."""
 import sys
 import threading
 import time

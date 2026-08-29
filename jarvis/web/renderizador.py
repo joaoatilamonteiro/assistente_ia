@@ -1,5 +1,4 @@
-"""Renderização de respostas da IA (com LaTeX/markdown) num template HTML
-aberto direto no navegador."""
+
 import os
 import tempfile
 import webbrowser

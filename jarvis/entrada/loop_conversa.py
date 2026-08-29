@@ -1,14 +1,11 @@
-"""
-Loop principal de conversa: é aqui que a entrada do usuário (texto,
-comandos com \\, arquivos, imagens e prints) é lida, interpretada e
-mandada pra IA (nuvem via Groq, com fallback pro Ollama local).
-"""
+
 # Imports da biblioteca padrão
 import base64
 import json
 import os
 import re
 import subprocess
+import time
 from datetime import datetime
 
 # Imports de terceiros
@@ -18,12 +15,13 @@ import PyPDF2
 from jarvis.config import client_local, client, modelo_local, regras_base, prompts_especialistas, carregar_capacidades_ia
 from jarvis.utils.animacao import LoadingAnimado
 from jarvis.utils.texto import monta_historico_slim, parece_recusa
+from jarvis.utils.tempo import formatar_duracao
 from jarvis.ia.visao import analisar_imagem
-from jarvis.ia.roteador import interpreta_comando, comprime_memoria
+from jarvis.ia.roteador import interpreta_comando_rapido, comprime_memoria
 from jarvis.ia.ferramentas import ferramentas_jarvis
 from jarvis.memoria.embeddings import gerar_embedding, buscar_memoria_semantica, fatiar_e_buscar_documento
 from jarvis.memoria.persistencia import carregar_historico, salvar_historico
-from jarvis.integracoes.google_calendar import adicionar_multiplos_eventos, apagar_eventos_por_termo, editar_evento_por_termo
+from jarvis.integracoes.google_calendar import adicionar_multiplos_eventos, apagar_eventos_por_termo, editar_evento_por_termo,listar_proximos_eventos
 from jarvis.integracoes.groq_status import verificar_saude_api
 from jarvis.web.renderizador import renderizar_no_navegador
 from jarvis.entrada.captura_tela import pega_print
@@ -297,7 +295,9 @@ def iniciar_conversa():
         if not ignora_qwen:
             loading = LoadingAnimado("🧭 Interpretando comando")
             loading.iniciar()
-            intencao = interpreta_comando(pergunta)
+            inicio_interpretacao = time.time()
+            intencao = interpreta_comando_rapido(pergunta)
+            print(f"⏱️ [interpreta_comando]: {formatar_duracao(time.time() - inicio_interpretacao)}")
             loading.parar()
 
         if intencao.get("comando") == "buscar_memoria":
@@ -305,7 +305,9 @@ def iniciar_conversa():
 
             loading = LoadingAnimado("🔍 Procurando vetores no passado")
             loading.iniciar()
+            inicio_busca = time.time()
             memoria_resgatada = buscar_memoria_semantica(pergunta, historico)
+            print(f"⏱️ [buscar_memoria_semantica]: {formatar_duracao(time.time() - inicio_busca)}")
             loading.parar()
 
             if memoria_resgatada:
@@ -317,7 +319,9 @@ def iniciar_conversa():
 
                 loading = LoadingAnimado("🗜️ Comprimindo memória")
                 loading.iniciar()
+                inicio_compressao = time.time()
                 contexto_comprimido = comprime_memoria(texto_bruto_para_resumir)
+                print(f"⏱️ [comprime_memoria]: {formatar_duracao(time.time() - inicio_compressao)}")
                 loading.parar()
                 memoria_curto_p = f"--- CONTEXTO RESGATADO ---\n{contexto_comprimido}\n--------------------------"
             else:
@@ -344,6 +348,7 @@ def iniciar_conversa():
         repescagem = True
         while repescagem:
             repescagem = False
+            inicio_resposta = time.time()  # marca o início desta tentativa de resposta
 
             especialidade_identificada = intencao.get("especialidade", "geral")
 
@@ -480,6 +485,18 @@ def iniciar_conversa():
                                     print(f"\n{resultado_funcao}")
                                 except Exception as e:
                                     resultado_funcao = f"erro na funcao de editar {str(e)}"
+                                    print(f"\n{resultado_funcao}")
+
+                            elif tc_data["name"] == "listar_proximos_eventos":
+                                try:
+                                    argumentos = json.loads(tc_data["arguments"])
+                                    resultado_funcao = listar_proximos_eventos(
+                                        termo_busca=argumentos.get("termo_busca"),
+                                        dias_frente = argumentos.get("dias_frente", 90)
+                                    )
+                                    print(f"\n{resultado_funcao}")
+                                except Exception as e:
+                                    resultado_funcao = f"erro na funcao ao listar eventos {str(e)}"
                                     print(f"\n{resultado_funcao}")
 
                             info_api.append({
@@ -644,6 +661,20 @@ def iniciar_conversa():
                                     resultado_funcao = f"erro na funcao de editar {str(e)}"
                                     print(f"\n{resultado_funcao}")
 
+                                    
+                            elif tc_data["name"] == "listar_proximos_eventos":
+                                try:
+                                    argumentos = json.loads(tc_data["arguments"])
+                                    resultado_funcao = listar_proximos_eventos(
+                                        termo_busca=argumentos.get("termo_busca"),
+                                        dias_frente = argumentos.get("dias_frente", 90)
+                                    )
+                                    print(f"\n{resultado_funcao}")
+                                except Exception as e:
+                                    resultado_funcao = f"erro na funcao ao listar eventos {str(e)}"
+                                    print(f"\n{resultado_funcao}")
+
+
                             info_api.append({
                                 "role": "tool",
                                 "tool_call_id": tc_data["id"],
@@ -741,6 +772,10 @@ def iniciar_conversa():
                         historico.pop()
                         continue
 
+            # --- CRONÔMETRO DA RESPOSTA ---
+            tempo_resposta = time.time() - inicio_resposta
+            print(f"⏱️ Tempo de resposta: {formatar_duracao(tempo_resposta)}")
+
             # --- REPESCAGEM VETORIAL ---
             if (("eu não sei" in resposta_completa_da_ia.lower().strip() or parece_recusa(resposta_completa_da_ia))
                     and memoria_curto_p == ""):
@@ -748,7 +783,9 @@ def iniciar_conversa():
 
                 loading = LoadingAnimado("Buscando memória semântica")
                 loading.iniciar()
+                inicio_busca_repescagem = time.time()
                 memoria_resgatada_repescagem = buscar_memoria_semantica(pergunta, historico)
+                print(f"⏱️ [buscar_memoria_semantica/repescagem]: {formatar_duracao(time.time() - inicio_busca_repescagem)}")
                 loading.parar()
 
                 if memoria_resgatada_repescagem:
@@ -760,7 +797,9 @@ def iniciar_conversa():
 
                     loading = LoadingAnimado("🗜️ Comprimindo memória resgatada")
                     loading.iniciar()
+                    inicio_compressao_repescagem = time.time()
                     contexto_comprimido = comprime_memoria(texto_bruto_para_resumir)
+                    print(f"⏱️ [comprime_memoria/repescagem]: {formatar_duracao(time.time() - inicio_compressao_repescagem)}")
                     loading.parar()
                     memoria_curto_p = f"--- RESUMO DO CONTEXTO ANTIGO ---\n{contexto_comprimido}\n---------------------------------"
                     repescagem = True
@@ -771,11 +810,17 @@ def iniciar_conversa():
             # --- SALVAMENTO E VETORIZAÇÃO ---
             texto_vetorizar = f"Usuário: {pergunta} | IA: {resposta_completa_da_ia}"
 
+            inicio_embedding = time.time()
+            embedding_resposta = gerar_embedding(texto_vetorizar)
+            print(f"⏱️ [gerar_embedding]: {formatar_duracao(time.time() - inicio_embedding)}")
+
             historico.append({
                 "role": "assistant",
                 "content": resposta_completa_da_ia,
                 "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                "embedding": gerar_embedding(texto_vetorizar)
+                "embedding": embedding_resposta
             })
 
+            inicio_salvamento = time.time()
             salvar_historico(historico)
+            print(f"⏱️ [salvar_historico]: {formatar_duracao(time.time() - inicio_salvamento)}")

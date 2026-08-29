@@ -1,10 +1,4 @@
-"""
-Importa um arquivo JSON externo (uma lista de mensagens no formato
-[{"role": "user"/"assistant", "content": "..."}, ...]) para dentro do
-data/historico.json, gerando embedding para cada mensagem importada.
 
-Uso: python scripts/importar_conversa.py caminho/para/conversa.json
-"""
 import json
 import sys
 import os
