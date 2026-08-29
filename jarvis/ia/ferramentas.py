@@ -69,7 +69,7 @@ ferramentas_jarvis = [
                         "type": "string",
                         "description": "Palavra-chave pra filtrar os eventos (ex: 'prova'). Deixe vazio pra listar todos os próximos eventos."
                     },
-                    "dias_a_frente": {
+                    "dias_frente": {
                         "type": "integer",
                         "description": "Quantos dias pra frente buscar. Padrão 90 se não especificado."
                     }

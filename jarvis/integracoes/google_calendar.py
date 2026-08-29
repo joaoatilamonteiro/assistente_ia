@@ -1,13 +1,10 @@
 """Integração com o Google Calendar: criar, editar e apagar eventos."""
 import datetime
 import os
-from calendar import calendar
-
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from openai import max_retries
 
 from jarvis.config import ARQUIVO_TOKEN, ARQUIVO_CREDENCIAIS, PASTA_CREDENCIAIS
 
@@ -202,9 +199,9 @@ def listar_proximos_eventos(termo_busca = None, dias_frente = 90):
 
         linhas = []
         for event in events:
-            inicio = event["start"].get("dateTime", event["start"].get("data"))
+            inicio = event["start"].get("dateTime", event["start"].get("date"))
             linhas.append(f"-{event.get('summary', '(sem titulo)')}: {inicio}")
-        return f"Eventos encontrados: \n\n{linhas}"
+        return "Eventos encontrados:\n" + "\n".join(linhas)
 
     except Exception as e:
         return f"erro ao listar {str(e)}"
