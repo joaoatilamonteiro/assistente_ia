@@ -1,61 +1,73 @@
-
-# Imports da biblioteca padrão
 import base64
-import json
 import os
 import re
 import subprocess
-import time
 from datetime import datetime
 
-# Imports de terceiros
 import PyPDF2
 
 # Imports locais
-from jarvis.config import client_local, client, modelo_local, regras_base, prompts_especialistas, carregar_capacidades_ia
+from jarvis.config import client
 from jarvis.utils.animacao import LoadingAnimado
-from jarvis.utils.texto import monta_historico_slim, parece_recusa
 from jarvis.utils.tempo import formatar_duracao
 from jarvis.ia.visao import analisar_imagem
-from jarvis.ia.roteador import interpreta_comando_rapido, comprime_memoria
-from jarvis.ia.ferramentas import ferramentas_jarvis
-from jarvis.memoria.embeddings import gerar_embedding, buscar_memoria_semantica, fatiar_e_buscar_documento
-from jarvis.memoria.persistencia import carregar_historico, salvar_historico
-from jarvis.integracoes.google_calendar import adicionar_multiplos_eventos, apagar_eventos_por_termo, editar_evento_por_termo,listar_proximos_eventos
+from jarvis.ia.motor import motor_pensamento
+from jarvis.memoria.embeddings import fatiar_e_buscar_documento
 from jarvis.integracoes.groq_status import verificar_saude_api
-from jarvis.web.renderizador import renderizar_no_navegador
 from jarvis.entrada.captura_tela import pega_print
 
 
+def _callback_cli(tipo, **dados):
+    if tipo == "buscando_memoria":
+        print("🤖 Jarvis: Estou vasculhando meus arquivos (Busca Semântica)...")
+    elif tipo == "memoria_encontrada":
+        print("🧠 Achei memórias conectadas a esse assunto!")
+    elif tipo == "memoria_nao_encontrada":
+        print("📭 Não achei conexões semânticas úteis nos arquivos antigos.")
+    elif tipo == "pensando":
+        destino = "nuvem (Groq)" if dados.get("destino") == "nuvem" else "local (Ollama)"
+        print(f"IA [{destino}]: ", end="")
+    elif tipo == "fallback_local":
+        print("\n⚠️ [ALERTA DE INFRAESTRUTURA] Groq sobrecarregada ou limite atingido!")
+        print("🔄 Acionando a Rota de Fuga: Transferindo carga para o Ollama local...")
+    elif tipo == "erro_nuvem":
+        print(f"\n❌ ERRO NA NUVEM: {dados.get('erro')}")
+    elif tipo == "erro_local":
+        print(f"\n❌ Falha catastrófica em ambas as mentes: {dados.get('erro')}")
+    elif tipo == "acionando_ferramentas":
+        print(f"\n🤖 Jarvis: Entendido! Acionando: {', '.join(dados.get('ferramentas', []))}")
+    elif tipo == "ferramenta_executada":
+        print(f"🛠️ [RAIO-X] '{dados.get('nome')}' -> {dados.get('resultado')}")
+    elif tipo == "recebendo_confirmacao_final":
+        print("☁️ Jarvis: Recebendo confirmação final...")
+    elif tipo == "repescagem_iniciada":
+        print("\n🤖 O modelo não achou no contexto curto. Acionando busca vetorial...")
+    elif tipo == "repescagem_encontrada":
+        print("Achei conexões no passado! Resumindo o assunto...\n" + "-" * 40)
+    elif tipo == "repescagem_vazia":
+        print("📭 Realmente não achei conexões semânticas nos arquivos antigos.")
+    elif tipo == "resposta_pronta":
+        print(f"\n⏱️ Tempo de resposta: {formatar_duracao(dados.get('duracao', 0))}")
+
+
+
 def iniciar_conversa():
-    # ==========================================
-    # MEMÓRIA E CONFIGURAÇÃO
-    # ==========================================
-    historico = carregar_historico()
-
-    memoria_curto_p = ""
-
-    modo_ia = "auto"  # auto, local, nuvem
-
-    capacidades_ia = carregar_capacidades_ia()
-
-    repescagem = False
+    motor = motor_pensamento(
+        on_evento=_callback_cli,
+        on_texto=lambda pedaco: print(pedaco, end="", flush=True),
+    )
 
     # ==========================================
     # LOOP PRINCIPAL DE CONVERSA
     # ==========================================
     while True:
-        if not repescagem:
-            pergunta = input("\nVocê: ").strip()
-        else:
-            print("🔄 Jarvis: Processando o resgate de memória...")
+        pergunta = input("\nVocê: ").strip()
 
         if not pergunta:
             continue
 
         print("#####")
 
-        intencao = {"comando": "normal", "especialidade": "geral"}
         ignora_qwen = False
 
         if pergunta.startswith("\\"):
@@ -68,12 +80,16 @@ def iniciar_conversa():
                 print("Até logo!")
                 break
             elif comando == "esquece":
-                memoria_curto_p = ""
+                motor.esquecer_memoria_curta()
                 print("esqueci de tudo ja!")
                 continue
             elif comando == "help":
                 print(
-                    "💡 Dica: Digite '\\arquivo' para enviar um documento local.\nDigite '\\sair' para encerrar o chat.\nDigite '\\multi' para inserir múltiplas linhas.\nDigite '\\print' para analisar a ultima print tirada")
+                    "💡 Dica: Digite '\\arquivo' para enviar um documento local.\n"
+                    "Digite '\\sair' para encerrar o chat.\n"
+                    "Digite '\\multi' para inserir múltiplas linhas.\n"
+                    "Digite '\\print' para analisar a ultima print tirada.\n"
+                    "(equações agora já aparecem em unicode direto na tela - não precisa mais de '\\equacao')")
                 continue
 
             elif comando.startswith("modo"):
@@ -85,12 +101,10 @@ def iniciar_conversa():
                     "nuvem": "usará apenas a nuvem, maior poder de processamento, integração com calendario, entretanto, tem menos tokens"
                 }
 
-                if alvo in descricao:
-                    modo_ia = alvo
-                    print(f"modo alterado para: {descricao[modo_ia]}")
-
+                if motor.definir_modo(alvo):
+                    print(f"modo alterado para: {descricao[motor.modo_ia]}")
                 else:
-                    print(f"modo atual: '{modo_ia}' - {descricao[modo_ia]}")
+                    print(f"modo atual: '{motor.modo_ia}' - {descricao[motor.modo_ia]}")
                     print("use '\\modo auto'\n'\\modo local'\nmodo nuvem'")
                 continue
 
@@ -109,14 +123,6 @@ def iniciar_conversa():
                     continue
 
                 print("✅ [Texto capturado. Enviando...]\n")
-            elif comando == "equacao":
-                if len(historico) > 1:
-                    ultima_resposta = historico[-1]["content"]
-                    renderizar_no_navegador(ultima_resposta)
-                else:
-                    print("Não ha historico para rendenrizar")
-                continue
-
             elif comando == "saude":
                 print("🩺 Verificando os sinais vitais do servidor da Groq...")
                 loading = LoadingAnimado("🩺 Consultando a Groq")
@@ -292,535 +298,18 @@ def iniciar_conversa():
                 print("comando não achado")
                 continue
 
-        if not ignora_qwen:
-            loading = LoadingAnimado("🧭 Interpretando comando")
-            loading.iniciar()
-            inicio_interpretacao = time.time()
-            intencao = interpreta_comando_rapido(pergunta)
-            print(f"⏱️ [interpreta_comando]: {formatar_duracao(time.time() - inicio_interpretacao)}")
-            loading.parar()
-
-        if intencao.get("comando") == "buscar_memoria":
-            print("🤖 Jarvis: Estou vasculhando meus arquivos (Busca Semântica)...")
-
-            loading = LoadingAnimado("🔍 Procurando vetores no passado")
-            loading.iniciar()
-            inicio_busca = time.time()
-            memoria_resgatada = buscar_memoria_semantica(pergunta, historico)
-            print(f"⏱️ [buscar_memoria_semantica]: {formatar_duracao(time.time() - inicio_busca)}")
-            loading.parar()
-
-            if memoria_resgatada:
-                print("🧠 Achei memórias conectadas a esse assunto!")
-
-                texto_bruto_para_resumir = ""
-                for m in memoria_resgatada:
-                    texto_bruto_para_resumir += f"[{m.get('data', '')}] {m.get('role').upper()}: {m.get('content')}\n\n"
-
-                loading = LoadingAnimado("🗜️ Comprimindo memória")
-                loading.iniciar()
-                inicio_compressao = time.time()
-                contexto_comprimido = comprime_memoria(texto_bruto_para_resumir)
-                print(f"⏱️ [comprime_memoria]: {formatar_duracao(time.time() - inicio_compressao)}")
-                loading.parar()
-                memoria_curto_p = f"--- CONTEXTO RESGATADO ---\n{contexto_comprimido}\n--------------------------"
-            else:
-                print("📭 Não achei conexões semânticas úteis nos arquivos antigos.")
 
         if not pergunta:
             continue
 
-        # ==========================================
-        # --- ENVIO PARA A IA ---
-        # ==========================================
-        historico.append({
-            "role": "user",
-            "content": pergunta,
-            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        })
-
-        # Sua conta Groq tem limite de 8000 tokens/minuto (TPM) por request nesse
-        # modelo. O "Requested" da Groq soma: system prompt + histórico + o
-        # max_completion_tokens reservado pra resposta. Orçamento apertado aqui
-        # (2500 de histórico) pra sobrar espaço de verdade pra resposta sem estourar.
-        historico_enxuto = monta_historico_slim(historico, orcamento_token=2500)
-
-        repescagem = True
-        while repescagem:
-            repescagem = False
-            inicio_resposta = time.time()  # marca o início desta tentativa de resposta
-
-            especialidade_identificada = intencao.get("especialidade", "geral")
-
-            prompt_dinamico = regras_base + " " + prompts_especialistas.get(especialidade_identificada,
-                                                                            prompts_especialistas["geral"])
-
-            info_api = [{"role": "system", "content": prompt_dinamico}]
-
-            if capacidades_ia:
-                info_api.append({"role": "system", "content": capacidades_ia})
-            if memoria_curto_p != "":
-                info_api.append({
-                    "role": "system",
-                    "content": f"ATENÇÃO MÁXIMA: O usuário está te perguntando sobre um assunto do passado. AJA COMO SE VOCÊ SE LEMBRASSE DE TUDO DE FORMA NATURAL! NUNCA diga 'como um modelo de IA', 'não tenho memória', ou 'eu não sei' para esta pergunta. Use os dados resgatados abaixo para responder à pergunta atual do usuário:\n\n{memoria_curto_p}"
-                })
-
-            for info in historico_enxuto:
-                info_api.append({
-                    "role": info.get("role", "user"),
-                    "content": info.get("content", "")
-                })
-
-            loading = LoadingAnimado("Pensando")
-            loading.iniciar()
-            if modo_ia == "local":
-                loading.parar()
-                resposta_completa_da_ia = ""
-                ferramentas_acionadas = {}
-
-                loading_local = LoadingAnimado("🖥️ Mente local (Ollama) pensando")
-                loading_local.iniciar()
-                try:
-                    # Adicionamos as ferramentas aqui também!
-                    completion_local = client_local.chat.completions.create(
-                        model=modelo_local,
-                        messages=info_api,
-                        temperature=0.7,
-                        tools=ferramentas_jarvis,
-                        tool_choice="auto",
-                        stream=True,
-                        timeout=60.0,
-                    )
-
-                    primeiro_pedaco = True
-                    for chunk in completion_local:
-                        if not chunk.choices:
-                            continue
-
-                        delta = chunk.choices[0].delta
-
-                        # Captura de texto normal via stream
-                        if delta.content:
-                            if primeiro_pedaco:
-                                loading_local.parar()
-                                print("IA LOCAL: ", end="")
-                                primeiro_pedaco = False
-                            pedaco = delta.content
-                            resposta_completa_da_ia += pedaco
-                            print(pedaco, end="", flush=True)
-
-                        # Captura de chamadas de ferramentas (Function Calling) no Ollama
-                        if delta.tool_calls:
-                            if primeiro_pedaco:
-                                loading_local.parar()
-                                primeiro_pedaco = False
-
-                            for tc in delta.tool_calls:
-                                idx = tc.index
-                                if idx not in ferramentas_acionadas:
-                                    ferramentas_acionadas[idx] = {
-                                        "id": tc.id,
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments or ""
-                                    }
-                                else:
-                                    if tc.function.arguments:
-                                        ferramentas_acionadas[idx]["arguments"] += tc.function.arguments
-
-                    if primeiro_pedaco:
-                        loading_local.parar()
-                        print("Nenhuma resposta gerada pelo modelo local")
-                    print("\n")
-
-                    if ferramentas_acionadas:
-                        print("🤖 Jarvis (Local): Entendido! Acionando o calendário...")
-
-                        lista_tool_calls_formatada = []
-                        for idx, tc_data in ferramentas_acionadas.items():
-                            lista_tool_calls_formatada.append({
-                                "id": tc_data["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": tc_data["name"],
-                                    "arguments": tc_data["arguments"]
-                                }
-                            })
-
-                        info_api.append({
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": lista_tool_calls_formatada
-                        })
-
-                        for idx, tc_data in ferramentas_acionadas.items():
-                            print(f"\n🛠️ [RAIO-X LOCAL] Ferramenta chamada: '{tc_data['name']}'")
-                            print(f"🛠️ [RAIO-X LOCAL] Dados enviados: {tc_data['arguments']}\n")
-
-                            if tc_data["name"] == "adicionar_multiplos_eventos":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = adicionar_multiplos_eventos(eventos=argumentos.get("eventos", []))
-                                    print(f"\n{resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"Erro na função: {str(e)}"
-
-                            elif tc_data["name"] == "apagar_eventos_por_termo":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = apagar_eventos_por_termo(termo_busca=argumentos.get("termo_busca"))
-                                    print(f"\n🗑️ {resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"Erro na função de apagar: {str(e)}"
-
-                            elif tc_data["name"] == "editar_evento_por_termo":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = editar_evento_por_termo(
-                                        termo_busca=argumentos.get("termo_busca"),
-                                        novo_resumo=argumentos.get("novo_resumo"),
-                                        nova_data_hora_inicio=argumentos.get("nova_data_hora_inicio"),
-                                        nova_data_hora_fim=argumentos.get("nova_data_hora_fim"),
-                                        novo_lembrete_minutos=argumentos.get("novo_lembrete_minutos")
-                                    )
-                                    print(f"\n{resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"erro na funcao de editar {str(e)}"
-                                    print(f"\n{resultado_funcao}")
-
-                            elif tc_data["name"] == "listar_proximos_eventos":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = listar_proximos_eventos(
-                                        termo_busca=argumentos.get("termo_busca"),
-                                        dias_frente = argumentos.get("dias_frente", 90)
-                                    )
-                                    print(f"\n{resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"erro na funcao ao listar eventos {str(e)}"
-                                    print(f"\n{resultado_funcao}")
-
-                            info_api.append({
-                                "role": "tool",
-                                "tool_call_id": tc_data["id"],
-                                "name": tc_data["name"],
-                                "content": str(resultado_funcao)
-                            })
-
-                        print("🖥️ Jarvis (Local): Recebendo confirmação final...")
-                        loading_local_final = LoadingAnimado("🖥️ Processando resposta final local")
-                        loading_local_final.iniciar()
-
-                        completion_final_local = client_local.chat.completions.create(
-                            model=modelo_local,
-                            messages=info_api,
-                            temperature=0.7,
-                            tools=ferramentas_jarvis,
-                            stream=True,
-                            timeout=60.0
-                        )
-
-                        primeiro_pedaco = True
-                        for chunk in completion_final_local:
-                            if not chunk.choices:
-                                continue
-                            delta = chunk.choices[0].delta
-                            if delta.content:
-                                if primeiro_pedaco:
-                                    loading_local_final.parar()
-                                    print("IA LOCAL: ", end="")
-                                    primeiro_pedaco = False
-                                print(delta.content, end="", flush=True)
-                                resposta_completa_da_ia += delta.content
-                        loading_local_final.parar()
-                        print("\n")
-
-                except Exception as erro_local:
-                    loading_local.parar()
-                    print(f"Erro no modo local {erro_local}")
-                    historico.pop()
-                    continue
-
-            else:
-                try:
-                    # --- TENTATIVA 1: NUVEM (GROQ) ---
-                    completion = client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=info_api,
-                        temperature=0.7,
-                        tools=ferramentas_jarvis,
-                        tool_choice="auto",
-                        max_completion_tokens=2000,  # sua conta tem TPM 8000; isso deixa espaço pro histórico caber junto
-                        top_p=1,
-                        stream=True
-                    )
-
-                    primeiro_pedaco = True
-                    resposta_completa_da_ia = ""
-                    tamanho_linha_atual = 0
-                    limite_carac = 80
-                    ferramentas_acionadas = {}
-
-                    for chunk in completion:
-                        if not chunk.choices:
-                            continue
-
-                        delta = chunk.choices[0].delta
-
-                        if delta.content:
-                            if primeiro_pedaco:
-                                loading.parar()
-                                print("IA: ", end="")
-                                primeiro_pedaco = False
-
-                            texto_recebido = delta.content
-                            resposta_completa_da_ia += texto_recebido
-
-                            for letra in texto_recebido:
-                                if letra == '\n':
-                                    print(letra, end="", flush=True)
-                                    tamanho_linha_atual = 0
-                                elif tamanho_linha_atual >= limite_carac and letra == ' ':
-                                    print("\n", end="", flush=True)
-                                    tamanho_linha_atual = 0
-                                else:
-                                    print(letra, end="", flush=True)
-                                    tamanho_linha_atual += 1
-
-                        if delta.tool_calls:
-                            if primeiro_pedaco:
-                                loading.parar()
-                                primeiro_pedaco = False
-
-                            for tc in delta.tool_calls:
-                                idx = tc.index
-                                if idx not in ferramentas_acionadas:
-                                    ferramentas_acionadas[idx] = {
-                                        "id": tc.id,
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments or ""
-                                    }
-                                else:
-                                    if tc.function.arguments:
-                                        ferramentas_acionadas[idx]["arguments"] += tc.function.arguments
-
-                    print("\n")
-
-                    # --- EXECUÇÃO DE FERRAMENTAS ---
-                    if ferramentas_acionadas:
-                        print("🤖 Jarvis: Entendido! Acionando o calendário...")
-
-                        lista_tool_calls_formatada = []
-                        for idx, tc_data in ferramentas_acionadas.items():
-                            lista_tool_calls_formatada.append({
-                                "id": tc_data["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": tc_data["name"],
-                                    "arguments": tc_data["arguments"]
-                                }
-                            })
-
-                        info_api.append({
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": lista_tool_calls_formatada
-                        })
-
-                        for idx, tc_data in ferramentas_acionadas.items():
-                            print(f"\n🛠️ [RAIO-X] Ferramenta chamada pela IA: '{tc_data['name']}'")
-                            print(f"🛠️ [RAIO-X] Dados enviados: {tc_data['arguments']}\n")
-
-                            if tc_data["name"] == "adicionar_multiplos_eventos":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = adicionar_multiplos_eventos(eventos=argumentos.get("eventos", []))
-                                    print(f"\n{resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"Erro na função: {str(e)}"
-
-                            elif tc_data["name"] == "apagar_eventos_por_termo":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = apagar_eventos_por_termo(termo_busca=argumentos.get("termo_busca"))
-                                    print(f"\n🗑️ {resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"Erro na função de apagar: {str(e)}"
-
-                            elif tc_data["name"] == "editar_evento_por_termo":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = editar_evento_por_termo(
-                                        termo_busca=argumentos.get("termo_busca"),
-                                        novo_resumo=argumentos.get("novo_resumo"),
-                                        nova_data_hora_inicio=argumentos.get("nova_data_hora_inicio"),
-                                        nova_data_hora_fim=argumentos.get("nova_data_hora_fim"),
-                                        novo_lembrete_minutos=argumentos.get("novo_lembrete_minutos")
-                                    )
-                                    print(f"\n{resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"erro na funcao de editar {str(e)}"
-                                    print(f"\n{resultado_funcao}")
-
-                                    
-                            elif tc_data["name"] == "listar_proximos_eventos":
-                                try:
-                                    argumentos = json.loads(tc_data["arguments"])
-                                    resultado_funcao = listar_proximos_eventos(
-                                        termo_busca=argumentos.get("termo_busca"),
-                                        dias_frente = argumentos.get("dias_frente", 90)
-                                    )
-                                    print(f"\n{resultado_funcao}")
-                                except Exception as e:
-                                    resultado_funcao = f"erro na funcao ao listar eventos {str(e)}"
-                                    print(f"\n{resultado_funcao}")
-
-
-                            info_api.append({
-                                "role": "tool",
-                                "tool_call_id": tc_data["id"],
-                                "name": tc_data["name"],
-                                "content": str(resultado_funcao)
-                            })
-
-                        print("☁️ Jarvis: Recebendo confirmação final...")
-                        loading = LoadingAnimado("☁️ Recebendo confirmação final")
-                        loading.iniciar()
-                        completion_final = client.chat.completions.create(
-                            model="openai/gpt-oss-120b",
-                            messages=info_api,
-                            temperature=0.7,
-                            tools=ferramentas_jarvis,
-                            max_completion_tokens=2000,
-                            stream=True
-                        )
-
-                        primeiro_pedaco = True
-                        for chunk in completion_final:
-                            if not chunk.choices:
-                                continue
-                            delta = chunk.choices[0].delta
-                            if delta.content:
-                                if primeiro_pedaco:
-                                    loading.parar()
-                                    print("IA: ", end="")
-                                    primeiro_pedaco = False
-                                print(delta.content, end="", flush=True)
-                                resposta_completa_da_ia += delta.content
-                        loading.parar()
-                        print("\n")
-
-                # --- TENTATIVA 2: FALLBACK LOCAL (OLLAMA) ---
-                except Exception as erro_groq:
-                    loading.parar()
-                    erro_str = str(erro_groq)
-                    if modo_ia == "auto" and ("413" in erro_str or "429" in erro_str):
-                        print("\n⚠️ [ALERTA DE INFRAESTRUTURA] Groq sobrecarregada ou limite atingido!")
-                        print("🔄 Acionando a Rota de Fuga: Transferindo carga para o Ollama local...")
-
-                        info_api_local = [info_api[0]]
-
-                        if len(info_api) > 1 and "ATENÇÃO MÁXIMA" in info_api[1].get("content", ""):
-                            info_api_local.append(info_api[1])
-
-                        for hist in historico_enxuto[-4:]:
-                            if hist.get("role") == "assistant" and parece_recusa(hist.get("content", "")):
-                                continue
-                            info_api_local.append({"role": hist.get("role", "user"), "content": hist.get("content", "")})
-
-                        if info_api_local[-1]["content"] != pergunta:
-                            info_api_local.append({"role": "user", "content": pergunta})
-
-                        loading_local = LoadingAnimado("🖥️ Mente local (Ollama) pensando")
-                        loading_local.iniciar()
-                        try:
-                            completion_local = client_local.chat.completions.create(
-                                model=modelo_local,
-                                messages=info_api_local,
-                                temperature=0.7,
-                                stream=True,
-                                timeout=60.0,
-                            )
-
-                            primeiro_pedaco = True
-                            resposta_completa_da_ia = ""
-
-                            for chunk in completion_local:
-                                if chunk.choices and chunk.choices[0].delta.content:
-                                    if primeiro_pedaco:
-                                        loading_local.parar()
-                                        print("IA (Ollama Local): ", end="")
-                                        primeiro_pedaco = False
-
-                                    pedaco = chunk.choices[0].delta.content
-                                    resposta_completa_da_ia += pedaco
-                                    print(pedaco, end="", flush=True)
-
-                            if primeiro_pedaco:
-                                loading_local.parar()
-                                print("IA (Ollama Local): [Nenhuma resposta gerada pelo modelo local]")
-
-                            print("\n")
-                        except Exception as erro_local:
-                            if primeiro_pedaco:
-                                loading_local.parar()
-                            print(f"\n❌ Falha catastrófica em ambas as mentes. Erro Ollama Local: {erro_local}")
-                            historico.pop()
-                            continue
-                    else:
-                        # O bloco else captura qualquer erro que não seja tratado acima
-                        print(f"\n❌ ERRO NA NUVEM: {erro_str}")
-                        historico.pop()
-                        continue
-
-            # --- CRONÔMETRO DA RESPOSTA ---
-            tempo_resposta = time.time() - inicio_resposta
-            print(f"⏱️ Tempo de resposta: {formatar_duracao(tempo_resposta)}")
-
-            # --- REPESCAGEM VETORIAL ---
-            if (("eu não sei" in resposta_completa_da_ia.lower().strip() or parece_recusa(resposta_completa_da_ia))
-                    and memoria_curto_p == ""):
-                print("\n🤖 O modelo não achou no contexto curto. Acionando busca vetorial...")
-
-                loading = LoadingAnimado("Buscando memória semântica")
-                loading.iniciar()
-                inicio_busca_repescagem = time.time()
-                memoria_resgatada_repescagem = buscar_memoria_semantica(pergunta, historico)
-                print(f"⏱️ [buscar_memoria_semantica/repescagem]: {formatar_duracao(time.time() - inicio_busca_repescagem)}")
-                loading.parar()
-
-                if memoria_resgatada_repescagem:
-                    print("Achei conexões no passado! Resumindo o assunto...\n" + "-" * 40)
-
-                    texto_bruto_para_resumir = ""
-                    for m in memoria_resgatada_repescagem:
-                        texto_bruto_para_resumir += f"[{m.get('role').upper()}]: {m.get('content')}\n"
-
-                    loading = LoadingAnimado("🗜️ Comprimindo memória resgatada")
-                    loading.iniciar()
-                    inicio_compressao_repescagem = time.time()
-                    contexto_comprimido = comprime_memoria(texto_bruto_para_resumir)
-                    print(f"⏱️ [comprime_memoria/repescagem]: {formatar_duracao(time.time() - inicio_compressao_repescagem)}")
-                    loading.parar()
-                    memoria_curto_p = f"--- RESUMO DO CONTEXTO ANTIGO ---\n{contexto_comprimido}\n---------------------------------"
-                    repescagem = True
-                    continue
-                else:
-                    print("📭 Realmente não achei conexões semânticas nos arquivos antigos.")
-
-            # --- SALVAMENTO E VETORIZAÇÃO ---
-            texto_vetorizar = f"Usuário: {pergunta} | IA: {resposta_completa_da_ia}"
-
-            inicio_embedding = time.time()
-            embedding_resposta = gerar_embedding(texto_vetorizar)
-            print(f"⏱️ [gerar_embedding]: {formatar_duracao(time.time() - inicio_embedding)}")
-
-            historico.append({
-                "role": "assistant",
-                "content": resposta_completa_da_ia,
-                "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                "embedding": embedding_resposta
-            })
-
-            inicio_salvamento = time.time()
-            salvar_historico(historico)
-            print(f"⏱️ [salvar_historico]: {formatar_duracao(time.time() - inicio_salvamento)}")
+        loading = LoadingAnimado("Pensando")
+        loading.iniciar()
+        try:
+            resultado = motor.processar(pergunta, ignora_intencao=ignora_qwen)
+        except Exception as erro:
+            loading.parar()
+            print(f"\n❌ Não deu pra responder dessa vez: {erro}")
+            continue
+        loading.parar()
+
+        print(f"\nJarvis: {resultado['resposta_formatada']}\n")

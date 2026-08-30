@@ -5,9 +5,7 @@ __pycache__/
 *.pyc
 
 # Dados sensíveis / gerados
-data/historico.json
-data/credenciais/credenciais.json
-data/credenciais/token.json
+*.json
 
 # IDE
 .idea/
