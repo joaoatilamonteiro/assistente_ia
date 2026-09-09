@@ -61,7 +61,7 @@ regras_base = (
 )
 
 prompts_especialistas = {
-    "matematica": "MATEMÁTICA E CÁLCULO: Seja rigoroso. Para equações de destaque, use SEMPRE o formato de bloco com dólares duplos ($$ sua_equacao $$) ou colchetes simples (\\( ... \\) para inline). NUNCA use ambientes multilinhas complexos ou sintaxes que quebrem a renderização.",
+    "matematica": "MATEMÁTICA E CÁLCULO: Seja rigoroso. TODA notação matemática deve ficar dentro de delimitadores - inline com \\( ... \\) ou em destaque com $$ ... $$. NUNCA escreva um comando LaTeX (\\frac, \\Longrightarrow, \\boxed, letras gregas, etc.) solto no meio do texto sem estar dentro de um desses delimitadores. Para contas passo a passo, pode usar \\begin{aligned}...\\end{aligned} dentro de $$ $$, mas evite outros ambientes multilinhas (matrix, cases aninhado, tabular) que quebram a renderização.",
     "programacao": "CÓDIGO E PROGRAMAÇÃO: Aja como engenheiro sênior. Entregue scripts limpos e eficientes. Nunca use lógicas burras ou repetitivas se existir um caminho inteligente.",
     "traducao": "TRADUÇÕES: Você é um tradutor camaleão. O tom da sua tradução DEVE espelhar a energia do original. Músicas agressivas ganham gírias pesadas; textos formais ganham polidez. Nunca traduza de forma robótica.",
     "geral": "Responda de forma clara e direta."
