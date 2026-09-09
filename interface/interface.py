@@ -1,36 +1,15 @@
-"""
-Protótipo de TUI (Terminal User Interface) para o Jarvis, inspirado no
-ncspot: navegação por atalho, visual limpo mas com personalidade, sem
-parecer um terminal cru de print().
-
-Isso é só a CASCA visual - ainda não está ligada ao motor de verdade
-(jarvis.entrada.loop_conversa). O ponto de integração está marcado
-claramente na função `gerar_resposta()` lá embaixo.
-
-Rodar:
-    pip install textual --break-system-packages
-    python jarvis_tui_prototipo.py
-
-Atalhos:
-    Ctrl+L  - limpa a conversa
-    Ctrl+M  - alterna entre modo auto / local / nuvem (só visual, por ora)
-    Ctrl+Q  - sair
-"""
 import asyncio
 import base64
 import os
 import random
-import re
-import subprocess
 from datetime import datetime
 
 import PyPDF2
-from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import Footer, Header, RichLog, Static, TextArea
 
 # Imports do Jarvis (Ajuste os caminhos se necessário)
 from jarvis.config import client
@@ -40,6 +19,10 @@ from jarvis.integracoes.groq_status import verificar_saude_api
 from jarvis.memoria.embeddings import fatiar_e_buscar_documento
 from jarvis.entrada.captura_tela import pega_print
 
+
+import re
+from rich.markdown import Markdown
+from jarvis.utils.motor_latex import latex_para_unicode
 # ==========================================
 # "PERSONALIDADE" - frases de status/loading que refletem o tom do Jarvis
 # (mesmo espírito do regras_base: direto, sem frescura, um pouco sarcástico)
@@ -112,9 +95,8 @@ class PainelComandos(Static):
 
 
 class JarvisTUI(App):
-    """Interface de terminal do Jarvis - protótipo visual."""
 
-    TITLE = "JARVIS"
+    TITLE = "Adomo"
     SUB_TITLE = "assistente de terminal"
 
     CSS = """
@@ -149,17 +131,17 @@ class JarvisTUI(App):
     #entrada {
         dock: bottom;
         margin-top: 1;
-    }
-
-    Input {
+        height: 5;
         border: round $accent;
     }
+
     """
 
     BINDINGS = [
         Binding("ctrl+l", "limpar", "Limpar conversa"),
-        Binding("ctrl+m", "alternar_modo", "Trocar modo"),
+        Binding("ctrl+t", "alternar_modo", "Trocar modo"),
         Binding("ctrl+q", "quit", "Sair"),
+        Binding("ctrl+s", "enviar", "Enviar mensagem", priority=True)
     ]
 
     def compose(self) -> ComposeResult:
@@ -171,13 +153,13 @@ class JarvisTUI(App):
                 yield PainelComandos(id="comandos")
             with Vertical(id="chat-area"):
                 yield RichLog(id="log", highlight=True, markup=True, wrap=True)
-                yield Input(placeholder="Digite sua mensagem e aperte Enter...", id="entrada")
+                yield TextArea(placeholder="Digite sua mensagem e aperte Enter...", id="entrada")
         yield Footer()
 
     def on_mount(self) -> None:
         log = self.query_one("#log", RichLog)
-        log.write("[bold green]Jarvis:[/bold green] E aí! Tô de pé, sem frescura. Manda a boa.")
-        self.query_one("#entrada", Input).focus()
+        log.write("[bold green]Adomo:[/bold green] E aí! Tô de pé, sem frescura. Manda a boa.")
+        self.query_one("#entrada", TextArea).focus()
 
         self.motor = motor_pensamento(
             on_evento=self.evento_motor,
@@ -211,18 +193,19 @@ class JarvisTUI(App):
     def texto_motor(self, pedaco: str) -> None:
         self._resposta_streaming += pedaco
 
-    @on(Input.Submitted, "#entrada")
-    async def enviar_mensagem(self, evento: Input.Submitted) -> None:
-        pergunta = evento.value.strip()
+    async def action_enviar(self) -> None:
+        entrada = self.query_one("#entrada",TextArea)
+        if entrada.disabled:
+            return
+        pergunta = entrada.text.strip()
         if not pergunta:
             return
 
         log = self.query_one("#log", RichLog)
-        entrada = self.query_one("#entrada", Input)
         status = self.query_one("#status", PainelStatus)
         hora = datetime.now().strftime("%H:%M")
 
-        entrada.value = ""
+        entrada.text = ""
         entrada.disabled = True
         pergunta_para_motor = pergunta
         ignora_qwen = False
@@ -231,8 +214,7 @@ class JarvisTUI(App):
         if pergunta.startswith("\\"):
             partes = pergunta.split(" ", 1)
             comando = partes[0][1:].lower().strip()
-            argumento = partes[1].strip() if len(partes) > 1 else ""
-
+            argumento = partes[1].strip() if len(partes)  > 1 else ""
             if comando == "sair":
                 self.exit()
                 return
@@ -349,18 +331,24 @@ class JarvisTUI(App):
         status.acao_atual = random.choice(FRASES_PENSANDO)
         inicio = asyncio.get_event_loop().time()
 
+
         try:
             self._resposta_streaming = ""
             self.motor.definir_modo(status.modo)
-            resultado = await asyncio.to_thread(self.motor.processar, pergunta_para_motor, ignora_intencao = ignora_qwen)
+            resultado = await asyncio.to_thread(self.motor.processar, pergunta_para_motor, ignora_intencao=ignora_qwen)
             resposta = resultado["resposta_formatada"]
+            houve_erro = False
         except Exception as erro:
             resposta = f"[bold red]Falha no processamento: {erro}[/bold red]"
-
+            houve_erro = True
         duracao = asyncio.get_event_loop().time() - inicio
-
-        log.write(f"[bold green]Jarvis:[/bold green] {resposta}")
-
+        log.write(f"[bold green]Adomo[/bold green] [dim]({hora})[/dim]:")
+        if houve_erro:
+            log.write(resposta)
+        else:
+            resposta_limpa = re.sub(r"<br\s*/?>", "\n", resposta, flags=re.IGNORECASE)
+            resposta_limpa = latex_para_unicode(resposta_limpa)
+            log.write(Markdown(resposta_limpa))
         status.ultima_latencia = f"{duracao:.2f}s"
         status.total_mensagens += 1
         status.acao_atual = "Aguardando..."
