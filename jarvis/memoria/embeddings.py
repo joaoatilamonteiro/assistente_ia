@@ -3,7 +3,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 modelo_embedding = SentenceTransformer("all-MiniLM-L6-v2")
-
+modelo_embedding.save(r"C:\projects\python_projects\ia_generativa\jarvis\memoria\modelo_memoria")
+print("Modelo salvo com sucesso")
+modelo_embedding = SentenceTransformer(r"C:\projects\python_projects\ia_generativa\jarvis\memoria\modelo_memoria")
 
 def gerar_embedding(texto):
     return modelo_embedding.encode(texto).tolist()
@@ -17,12 +19,7 @@ def cos_sim(a, b):
 
 
 def buscar_memoria_semantica(pergunta, historico, top_k=3):
-    """Varre o histórico caçando as memórias com maior ligação semântica.
 
-    Vetorizado com numpy (uma única operação matricial) em vez de chamar
-    cos_sim mensagem por mensagem - muito mais rápido conforme o
-    historico.json cresce.
-    """
     mensagens_com_vetor = [msg for msg in historico if msg.get("embedding")]
     if not mensagens_com_vetor:
         return []
@@ -50,7 +47,6 @@ def buscar_memoria_semantica(pergunta, historico, top_k=3):
 
 
 def fatiar_e_buscar_documento(texto_gigante, pergunta_usuario, top_k=3):
-    """Fatia um texto gigante, converte em vetores em lote e acha a agulha no palheiro."""
 
     # 1. Chunking: Pica o texto em pedaços de 1500 caracteres (aprox. 400 tokens)
     tamanho_pedaco = 1500
