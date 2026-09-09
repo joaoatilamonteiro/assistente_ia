@@ -37,13 +37,15 @@ executores_ferramentas = {
 }
 
 class motor_pensamento:
-    def __init__(self, on_evento=None, on_texto=None):
+    def __init__(self, on_evento=None, on_texto=None, confirmar_pc = None):
         self.historico = carregar_historico()
         self.memoria_curto_p = ""
         self.modo_ia = "auto"  # auto, local, nuvem
         self.capacidades_ia = carregar_capacidades_ia()
         self._on_evento = on_evento or (lambda tipo, **kw: None)
         self._on_texto = on_texto or (lambda pedaco: None)
+
+        self._confirmar_pc = confirmar_pc
 
     def esquecer_memoria_curta(self):
         self.memoria_curto_p = ""
@@ -249,15 +251,25 @@ class motor_pensamento:
         # ----------------- ferramentas (calendário,controle) -----------------
 
     def executar_ferramenta(self, nome, argumentos_json):
-
-        executor = executores_ferramentas.get(nome)
-        if not executor:
-            return f"Ferramenta desconhecida: {nome}"
         try:
             argumentos = json.loads(argumentos_json)
+        except Exception as e:
+            return f"erro ao interpretaro argumentos de {nome}: {e}"
+
+        if nome in NOMES_ACOES_PC:
+            try:
+                if self._confirmar_pc:
+                    return executar_acao_pc(nome, argumentos, confirmar=self._confirmar_pc)
+                return executar_acao_pc(nome,argumentos)
+            except Exception as e:
+                return f"erro na ação de controle de pc {nome}: {e}"
+        executor = executores_ferramentas.get(nome)
+        if not executor:
+            return f"Ferramenta desconhecida {nome}"
+        try:
             return executor(argumentos)
         except Exception as e:
-            return f"Erro na função '{nome}': {e}"
+            return f"Erro na função {nome}: {e}"
 
     def resolver_ferramentas(self, info_api, ferramentas_acionadas, client_usado, modelo_usado):
         self._emit("acionando_ferramentas", ferramentas=[f["name"] for f in ferramentas_acionadas.values()])
@@ -287,7 +299,7 @@ class motor_pensamento:
 
         self._emit("recebendo_confirmacao_final")
         kwargs = dict(model=modelo_usado, messages=info_api, temperature=0.7,
-                      tools=ferramentas_jarvis, stream=True)
+                      tools=ferramentas, stream=True)
         if client_usado is client:
             kwargs["max_completion_tokens"] = 2000
         else:
