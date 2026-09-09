@@ -187,7 +187,7 @@ def _confirmar_no_terminal(descricao, categoria):
 
 
 def executar_acao_pc(nome, argumentos, confirmar=_confirmar_no_terminal):
-    """Ponto de entrada único: main.py e loop_conversa.py chamam só isso.
+    """Ponto de entrada único: a TUI (interface/interface.py, via jarvis.ia.motor) chama só isso.
     Sempre imprime a descrição. Ações enviar/deletar/instalar/fechar
     SEMPRE passam por `confirmar` antes de rodar - não é opcional."""
     if nome not in CATEGORIA_ACAO:
