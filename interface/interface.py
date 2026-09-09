@@ -19,7 +19,7 @@ from jarvis.integracoes.groq_status import verificar_saude_api
 from jarvis.memoria.embeddings import fatiar_e_buscar_documento
 from jarvis.entrada.captura_tela import pega_print
 
-
+import threading
 import re
 from rich.markdown import Markdown
 from jarvis.utils.motor_latex import latex_para_unicode
@@ -34,9 +34,27 @@ FRASES_EVENTO = {
     "comprimindo_memoria": "Resumindo o que achei...",
     "pensando": "Pensando (ou fingindo que penso)...",
     "fallback_local": "Groq deu pau, chamando o cérebro local...",
-    "acionando_ferramentas": "Mexendo no calendário...",
+    "acionando_ferramentas": "Executando ferramenta(s)...",
     "recebendo_confirmacao_final": "Fechando a resposta...",
     "repescagem_iniciada": "Não achei de cara, garimpando memória antiga...",
+}
+
+FRASES_FERRAMENTA = {
+    #calendario
+    "adicionar_multiplos_eventos": "Criando evento(s) na agenda...",
+    "apagar_eventos_por_termo": "Apagando evento(s) da agenda...",
+    "editar_evento_por_termo": "Editando evento na agenda...",
+    "listar_proximos_eventos": "Consultando a agenda...",
+    #controle do pc
+    "mover_mouse": "Movendo o mouse...",
+    "clicar": "Clicando na tela...",
+    "digitar_texto": "Digitando no teclado...",
+    "pressionar_tecla": "Apertando uma tecla...",
+    "tirar_screenshot": "Tirando um print da tela...",
+    "enviar_texto_e_enter": "Enviando texto e apertando Enter...",
+    "deletar_arquivo": "Mexendo pra deletar um arquivo...",
+    "instalar_pacote": "Instalando um pacote...",
+    "fechar_janela_ativa": "Fechando a janela em foco...",
 }
 
 FRASES_PENSANDO = [
@@ -92,6 +110,7 @@ class PainelComandos(Static):
             "\\modo     \\saude\n"
             "\\multi    \\esquece\n"
         )
+
 
 
 class JarvisTUI(App):
@@ -163,15 +182,48 @@ class JarvisTUI(App):
 
         self.motor = motor_pensamento(
             on_evento=self.evento_motor,
-            on_texto=self.texto_motor
+            on_texto=self.texto_motor,
+            confirmar_pc = self.confirmar_acao_pc,
         )
-        self._resposta_streaming= ""
+        self._resposta_streaming= None
+        self._confirmacao_pendente = None
+
+    def confirmar_acao_pc(self, descricao: str, categoria: str) -> bool:
+        """Chamado de dentro da worker thread do motor (asyncio.to_thread).
+        call_from_thread salta pro event loop principal do Textual pra
+        mostrar o modal, e bloqueia a worker thread até o usuário responder."""
+        evento = threading.Event()
+        resposta = {"valor":False}
+
+        def preparar():
+            self._confirmacao_pendente = {"evento": evento, "resposta": resposta}
+            log = self.query_one("#log", RichLog)
+            log.write(f"[bold red]🔒 CONFIRMAÇÃO NECESSÁRIA[/bold red] — categoria: {categoria.upper()}")
+            log.write(descricao)
+            log.write("[dim]Responda [bold]sim[/bold] ou [bold]não[/bold] no campo de mensagem.[/dim]")
+            entrada = self.query_one("#entrada", TextArea)
+            entrada.disabled = False
+            entrada.can_focus = True
+            entrada.focus()
+            self.call_after_refresh(entrada.focus)
+            self.set_timer(0.1, entrada.focus)
+
+        self.call_from_thread(preparar)
+        evento.wait()
+        return resposta["valor"]
+
 
     def evento_motor(self, tipo: str, **dados):
         status = self.query_one("#status", PainelStatus)
         memoria = self.query_one("#memoria", PainelMemoria)
 
-        frase = FRASES_EVENTO.get(tipo)
+        if tipo == "acionando_ferramentas":
+            nome = dados.get("ferramentas", [])
+            frases_encontradas = [FRASES_FERRAMENTA.get(n, f"executando '{n}'...")for n in nome]
+            frase = " / ".join(dict.fromkeys(frases_encontradas)) if frases_encontradas else FRASES_EVENTO.get(tipo)
+        else:
+            frase = FRASES_EVENTO.get(tipo)
+
         if frase:
             self.call_from_thread(setattr, status, "modo", status.modo)  # força refresh
             self.call_from_thread(setattr, status, "acao_atual", frase)
@@ -204,6 +256,25 @@ class JarvisTUI(App):
         log = self.query_one("#log", RichLog)
         status = self.query_one("#status", PainelStatus)
         hora = datetime.now().strftime("%H:%M")
+
+
+        if self._confirmacao_pendente is not None:
+            entrada.text = ""
+            pendente = self._confirmacao_pendente
+            self._confirmacao_pendente = None
+            autorizado = pergunta.strip().lower() in ("sim", "s", "yes", "y")
+
+            log.write(f"[bold blue]Você[/bold blue] [dim]({hora})[/dim]: {pergunta}")
+            log.write("[bold green]✅ Autorizado.[/bold green]" if autorizado else "[bold red]❌ Cancelado.[/bold red]")
+
+            pendente["resposta"]["valor"] = autorizado
+            pendente["evento"].set()
+            entrada.focus()
+            return
+
+        entrada.text = ""
+        entrada.disabled = True
+
 
         entrada.text = ""
         entrada.disabled = True
@@ -335,7 +406,25 @@ class JarvisTUI(App):
         try:
             self._resposta_streaming = ""
             self.motor.definir_modo(status.modo)
-            resultado = await asyncio.to_thread(self.motor.processar, pergunta_para_motor, ignora_intencao=ignora_qwen)
+            resultado_container = {}
+            erro_container = {}
+
+            def _rodar_motor():
+                try:
+                    resultado_container["valor"] = self.motor.processar(pergunta_para_motor,
+                                                                        ignora_intencao=ignora_qwen)
+                except Exception as e:
+                    erro_container["valor"] = e
+
+            thread = threading.Thread(target=_rodar_motor, daemon=True)
+            thread.start()
+            while thread.is_alive():
+                await asyncio.sleep(0.05)
+
+            if "valor" in erro_container:
+                raise erro_container["valor"]
+            resultado = resultado_container["valor"]
+
             resposta = resultado["resposta_formatada"]
             houve_erro = False
         except Exception as erro:
