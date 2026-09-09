@@ -1,9 +1,12 @@
-python-dotenv
 groq
 openai
+python-dotenv
 PyPDF2
+pyautogui
+numpy
+sentence-transformers
 google-api-python-client
 google-auth
 google-auth-oauthlib
-numpy
-sentence-transformers
+textual>=0.63
+rich
