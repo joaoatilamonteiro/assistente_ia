@@ -30,33 +30,154 @@ _GREGO = {
 }
 
 _SIMBOLOS = {
-    r"\leftrightarrow": "↔", r"\Leftrightarrow": "⇔", r"\rightarrow": "→",
-    r"\Rightarrow": "⇒", r"\leftarrow": "←", r"\Leftarrow": "⇐", r"\to": "→",
-    r"\times": "×", r"\cdot": "·", r"\div": "÷", r"\pm": "±", r"\mp": "∓",
-    r"\leq": "≤", r"\le": "≤", r"\geq": "≥", r"\ge": "≥", r"\neq": "≠", r"\ne": "≠",
-    r"\approx": "≈", r"\equiv": "≡", r"\cong": "≅", r"\sim": "∼",
-    r"\infty": "∞", r"\partial": "∂", r"\nabla": "∇",
-    r"\sum": "∑", r"\prod": "∏", r"\oint": "∮", r"\int": "∫",
-    r"\subseteq": "⊆", r"\supseteq": "⊇", r"\subset": "⊂", r"\supset": "⊃",
-    r"\cup": "∪", r"\cap": "∩", r"\emptyset": "∅", r"\forall": "∀", r"\exists": "∃",
-    r"\in": "∈", r"\notin": "∉", r"\therefore": "∴", r"\because": "∵",
-    r"\ldots": "…", r"\cdots": "⋯", r"\degree": "°",
+    r"\leftrightarrow": "↔",
+    r"\Leftrightarrow": "⇔",
+
+    r"\rightarrow": "→",
+    r"\Rightarrow": "⇒",
+    r"\longrightarrow": "⟶",
+    r"\Longrightarrow": "⟹",
+
+    r"\leftarrow": "←",
+    r"\Leftarrow": "⇐",
+    r"\longleftarrow": "⟵",
+    r"\Longleftarrow": "⟸",
+
+    r"\longleftrightarrow": "⟷",
+    r"\Longleftrightarrow": "⟺",
+
+    r"\to": "→",
+
+    r"\times": "×",
+    r"\cdot": "·",
+    r"\div": "÷",
+    r"\pm": "±",
+    r"\mp": "∓",
+    r"\leq": "≤",
+    r"\le": "≤",
+    r"\geq": "≥",
+    r"\ge": "≥",
+    r"\neq": "≠",
+    r"\ne": "≠",
+    r"\approx": "≈",
+    r"\equiv": "≡",
+    r"\cong": "≅",
+    r"\sim": "∼",
+    r"\infty": "∞",
+    r"\partial": "∂",
+    r"\nabla": "∇",
+    r"\sum": "∑",
+    r"\prod": "∏",
+    r"\oint": "∮",
+    r"\int": "∫",
+    r"\in": "∈",
+    r"\notin": "∉",
+    r"\mathbb{Z}": "ℤ",
+    r"\mathbbZ": "ℤ",
+    r"\mathbb{R}": "ℝ",
+    r"\mathbbR": "ℝ",
+    r"\implies": "⟹",
+    r"\iff": "⟺",
 }
 
-_COMANDOS_MUDOS = [r"\left", r"\right", r"\displaystyle", r"\,", r"\;", r"\!", r"\:"]
+
+_COMANDOS_MUDOS = [
+    r"\left", r"\right", r"\displaystyle", r"\textstyle",
+    r"\,", r"\;", r"\!", r"\:", r"\quad", r"\qquad", r"\limits"
+]
 
 # comandos de "nome de função" do LaTeX (\lim, \sin, \log...) - só tiram a barra
 _FUNCOES = [
-    "lim", "sin", "cos", "tan", "sec", "csc", "cot", "log", "ln", "exp",
+    "lim", "sin", "cos", "tan", "sec", "csc", "cot",
+    "arcsin", "arccos", "arctan",
+    "log", "ln", "exp",
     "max", "min", "sup", "inf", "det", "gcd", "arg", "mod",
 ]
+# comandos que só "envolvem" o conteúdo (\text{x}, \mathcal{F}...) - mantém só o argumento
+_ENVOLVENTES = ["text", "mathrm", "mathbf", "mathcal", "mathit", "boldsymbol", "operatorname"]
+
+# placeholders pra proteger \{ e \} (chaves de conjunto, tipo \{1,2,3\}) da limpeza
+# de chaves de agrupamento do latex (\frac{...}, \sqrt{...}) que roda no final
+_MARCA_LBRACE = "\x00LBRACE\x00"
+_MARCA_RBRACE = "\x00RBRACE\x00"
+
+def _resolve_big_delims(expr):
+    """Remove o "tamanho" de \\bigl( \\Bigr] \\biggl\\{ etc, mantendo só o delimitador."""
+    return re.sub(r"\\(?:Bigg|bigg|Big|big)[lrm]?", "", expr)
+
+def _resolve_boxed(expr):
+    saida = []
+    i = 0
+    while i < len(expr):
+        if expr[i:i + 6] == r"\boxed":
+            arg, j = _pega_argumento(expr, i + 6)
+            saida.append(f"⟦{_converter_expressao(arg)}⟧")
+            i = j
+        else:
+            saida.append(expr[i])
+            i += 1
+    return "".join(saida)
+
+def _resolve_brace_commands(expr, nome_comando):
+    """Resolve \\underbrace{A}_{rotulo} ou \\overbrace{A}^{rotulo} -> 'A (rotulo)'."""
+    token = "\\" + nome_comando
+    marcador = "_" if nome_comando == "underbrace" else "^"
+    saida = []
+    i = 0
+    while i < len(expr):
+        if expr[i:i + len(token)] == token:
+            arg, j = _pega_argumento(expr, i + len(token))
+            k = j
+            while k < len(expr) and expr[k] == " ":
+                k += 1
+            rotulo = ""
+            if k < len(expr) and expr[k] == marcador:
+                rotulo, j = _pega_argumento(expr, k + 1)
+            base = _converter_expressao(arg)
+            saida.append(f"{base} ({_converter_expressao(rotulo)})" if rotulo else base)
+            i = j
+        else:
+            saida.append(expr[i])
+            i += 1
+    return "".join(saida)
+
+def _resolve_envolventes(expr):
+    """Resolve \\text{x}, \\mathcal{F}, \\mathbf{v}... -> mantém só o conteúdo de dentro."""
+    saida = []
+    i = 0
+    while i < len(expr):
+        casou = False
+        for nome in _ENVOLVENTES:
+            token = "\\" + nome
+            fim_token = i + len(token)
+            if expr[i:fim_token] == token and not (fim_token < len(expr) and expr[fim_token].isalpha()):
+                arg, j = _pega_argumento(expr, fim_token)
+                saida.append(_converter_expressao(arg))
+                i = j
+                casou = True
+                break
+        if not casou:
+            saida.append(expr[i])
+            i += 1
+    return "".join(saida)
 
 
 def _converter_expressao(expr):
+    # protege \{ e \} (chaves de conjunto, ex: \{1,2,3\}) antes de qualquer coisa,
+    # senão a limpeza de chaves de agrupamento no final ia apagar elas também
+    expr = expr.replace(r"\{", _MARCA_LBRACE).replace(r"\}", _MARCA_RBRACE)
+
+    expr = re.sub(r"\[\d+(?:\.\d+)?(?:pt|em|ex|cm|mm|in)\]", "", expr)
+    
     for cmd in _COMANDOS_MUDOS:
         expr = expr.replace(cmd, "")
+    expr = _resolve_big_delims(expr)
     for nome in _FUNCOES:
         expr = re.sub(rf"\\{nome}(?![a-zA-Z])", nome, expr)
+    expr = _resolve_boxed(expr)
+    expr = _resolve_brace_commands(expr, "underbrace")
+    expr = _resolve_brace_commands(expr, "overbrace")
+    expr = _resolve_envolventes(expr)
     expr = _resolve_frac(expr)
     expr = _resolve_sqrt(expr)
     expr = _resolve_super_sub(expr, "^", _SUPER)
@@ -66,8 +187,10 @@ def _converter_expressao(expr):
     for cmd in sorted(_GREGO, key=len, reverse=True):
         expr = expr.replace(cmd, _GREGO[cmd])
     expr = expr.replace("{", "").replace("}", "")
+    expr = expr.replace(_MARCA_LBRACE, "{").replace(_MARCA_RBRACE, "}")
     expr = re.sub(r"[ \t]+", " ", expr).strip()
     return expr
+
 
 #para saber aonde fecha e aonde começa baseado nas chaves
 def _casa_chave(texto,inicio):
@@ -87,6 +210,11 @@ def _pega_argumento(texto, pos):
         pos +=1
     if pos >= len(texto):
         return "",pos
+    if texto[pos] == "{":
+        fim = _casa_chave(texto, pos)
+        if fim == -1:
+            return texto[pos + 1:], len(texto)
+        return texto[pos + 1:fim], fim + 1
     if texto[pos] == "\\":
         m = re.match(r"\\[a-zA-Z]+", texto[pos:])
         if m:
@@ -97,17 +225,19 @@ def _pega_argumento(texto, pos):
 def _resolve_frac(expressao):
     saida = []
     i = 0
-    while i<len(expressao):
-        if expressao[i:i+5] == r"\frac":
-            arg1, j = _pega_argumento(expressao, i+5)
+    while i < len(expressao):
+        # O regex captura \frac, \dfrac ou \tfrac
+        match = re.match(r"\\([dt]?frac)", expressao[i:])
+        if match:
+            tamanho_comando = len(match.group(0))
+            arg1, j = _pega_argumento(expressao, i + tamanho_comando)
             arg2, j = _pega_argumento(expressao, j)
             saida.append(f"({_converter_expressao(arg1)}/{_converter_expressao(arg2)})")
             i = j
         else:
             saida.append(expressao[i])
-            i+=1
+            i += 1
     return "".join(saida)
-
 
 def _resolve_sqrt(expr):
     saida = []
@@ -156,21 +286,60 @@ def _resolve_super_sub(expr, simbolo, mapa):
 # ==========================================
 # PONTO DE ENTRADA - é essa função que o resto do projeto usa
 # ==========================================
+def _processar_ambiente(conteudo):
+    """Resolve o miolo de um \\begin{aligned}...\\end{aligned} (ou align/gather/split):
+    quebra pelas linhas (\\\\), tira os '&' de alinhamento e converte cada linha."""
+    linhas = conteudo.split(r"\\")
+    linhas_convertidas = [
+        _converter_expressao(linha.replace("&", " ")) for linha in linhas
+    ]
+    return "\n".join(l for l in linhas_convertidas if l)
+
+
+# ==========================================
+# PONTO DE ENTRADA - é essa função que o resto do projeto usa
+# ==========================================
+# ==========================================
+# PONTO DE ENTRADA - é essa função que o resto do projeto usa
+# ==========================================
 _PADRAO_MATH = re.compile(
-    r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\$(.+?)\$|\\\((.+?)\\\)",
+    r"\$\$(?P<dd>.+?)\$\$"
+    r"|\\\[(?P<colch>.+?)\\\]"
+    r"|\$(?P<dolar>.+?)\$"
+    r"|\\\((?P<par>.+?)\\\)"
+    r"|\\begin\{(?P<env>aligned|align\*?|gather\*?|split)\}(?P<envcont>.+?)\\end\{(?P=env)\}",
     re.DOTALL,
 )
 
 
 def latex_para_unicode(texto):
     """Acha os trechos de matemática em LaTeX dentro de `texto` (delimitados por
-    $$..$$, \\[..\\], $..$ ou \\(..\\)) e devolve o texto com esses trechos já
-    convertidos pra unicode, sem os delimitadores. O resto do texto não é tocado."""
+    $$..$$, \\[..\\], $..$, \\(..\\), ou um bloco \\begin{aligned}...\\end{aligned})
+    e devolve o texto com esses trechos já convertidos pra unicode, sem os
+    delimitadores. O resto do texto não é tocado."""
     if not texto:
         return texto
 
-    def _troca(m):
-        conteudo = next(g for g in m.groups() if g is not None)
-        return _converter_expressao(conteudo)
+    def troca_math(m):
+        conteudo_normal = next(
+            (c for c in [m.group("dd"), m.group("colch"), m.group("dolar"), m.group("par")] if c is not None),
+            None
+        )
 
-    return _PADRAO_MATH.sub(_troca, texto)
+        if conteudo_normal is not None:
+            # Protege os ambientes no meio do bloco normal antes de converter tudo
+            conteudo_protegido = re.sub(
+                r"\\begin\{(?P<env>aligned|align\*?|gather\*?|split)\}(?P<conteudo>.*?)\\end\{(?P=env)\}",
+                lambda match: "\n" + _processar_ambiente(match.group("conteudo")) + "\n",
+                conteudo_normal,
+                flags=re.DOTALL
+            )
+            return _converter_expressao(conteudo_protegido)
+        else:
+            # É o match do grupo de ambiente "pelado" (sem cifrões em volta)
+            env_conteudo = m.group("envcont")
+            if env_conteudo:
+                return "\n" + _processar_ambiente(env_conteudo) + "\n"
+        return ""
+
+    return _PADRAO_MATH.sub(troca_math, texto)
