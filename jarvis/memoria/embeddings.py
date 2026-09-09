@@ -1,11 +1,20 @@
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
-
-modelo_embedding = SentenceTransformer("all-MiniLM-L6-v2")
-modelo_embedding.save(r"C:\projects\python_projects\ia_generativa\jarvis\memoria\modelo_memoria")
-print("Modelo salvo com sucesso")
-modelo_embedding = SentenceTransformer(r"C:\projects\python_projects\ia_generativa\jarvis\memoria\modelo_memoria")
+import os
+base_dir = os.getcwd()
+caminho_modelo = os.path.join(base_dir,"jarvis", "memoria", "modelo_memoria")
+try:
+    modelo_embedding = SentenceTransformer(caminho_modelo)
+    print("modelo carregado localmente com sucesso")
+except Exception as e:
+    print(f"não foi possivel carregar o modelo local\nerro{e}")
+    try:
+        modelo_embedding = SentenceTransformer("all-MiniLM-L6-v2")
+        modelo_embedding.save(caminho_modelo)
+        print("Modelo salvo com sucesso")
+    except Exception as e_download:
+        print(f"Erro ao baixar e salvar o modelo\nerro:{e}")
 
 def gerar_embedding(texto):
     return modelo_embedding.encode(texto).tolist()
