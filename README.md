@@ -1,8 +1,8 @@
 # IA-cat (Jarvis / Adomo)
 
 Assistente de IA local/nuvem com memória semântica, leitura de documentos/imagens,
-integração com o Google Calendar e controle de mouse/teclado (RPA), rodando numa
-interface de terminal (TUI).
+integração com o Google Calendar e controle de mouse/teclado (RPA, experimental),
+rodando numa interface de terminal (TUI).
 
 ## Como funciona (visão geral)
 
@@ -18,9 +18,10 @@ interface de terminal (TUI).
   cosseno.
 - **Google Calendar**: criar, editar e apagar eventos via function calling
   (só disponível no modo nuvem).
-- **Controle de PC (RPA)**: mover mouse, clicar, digitar, tirar screenshot, e ações
-  sensíveis (enviar texto+Enter, deletar arquivo, instalar pacote, fechar janela)
-  que exigem confirmação explícita antes de executar.
+- **Controle de PC (RPA)** *(em desenvolvimento, ainda não estável)*: mover mouse,
+  clicar, digitar, tirar screenshot, e ações sensíveis (enviar texto+Enter,
+  deletar arquivo, instalar pacote, fechar janela) com confirmação obrigatória
+  antes de executar.
 
 ## Estrutura do projeto
 
@@ -44,7 +45,7 @@ IA-cat/
 │   │   ├── roteador.py         # classifica a intenção da pergunta e comprime memória
 │   │   └── ferramentas.py      # schema das tools (function calling) do calendário
 │   ├── integracoes/
-│   │   ├── controle_pc.py      # RPA (pyautogui): mouse/teclado/arquivo/pacote, com confirmação
+│   │   ├── controle_pc.py      # RPA (pyautogui, experimental): mouse/teclado/arquivo/pacote, com confirmação
 │   │   ├── google_calendar.py  # criar/editar/apagar eventos
 │   │   ├── groq_status.py      # saúde/limites da API Groq
 │   │   └── autenticar_google.py# script de autenticação OAuth (rodar 1x)
@@ -153,11 +154,11 @@ Comandos disponíveis dentro do chat (prefixados por `\`):
 | `\saude`           | Mostra o status/limites atuais da API Groq             |
 | `\esquece`         | Reseta a memória de curto prazo da conversa atual      |
 
-## Controle de PC (RPA)
+## Controle de PC (RPA) — em desenvolvimento
 
-O assistente pode mover o mouse, clicar, digitar, tirar screenshot, e (com
-confirmação obrigatória na própria TUI) enviar texto + Enter, apagar arquivos,
-instalar pacotes e fechar a janela em foco. Ações sensíveis mostram a
-descrição exata do que será feito e esperam você responder `sim`/`não` no
-campo de mensagem antes de executar — essa confirmação está no código
-(`jarvis/integracoes/controle_pc.py`) e não pode ser pulada pelo modelo.
+O plano é o assistente poder mover o mouse, clicar, digitar, tirar screenshot,
+e (com confirmação obrigatória na própria TUI) enviar texto + Enter, apagar
+arquivos, instalar pacotes e fechar a janela em foco. A lógica de confirmação
+já está implementada em `jarvis/integracoes/controle_pc.py` e `jarvis/ia/motor.py`,
+mas essa parte ainda não está estável / totalmente funcional — trate como
+experimental por enquanto.
