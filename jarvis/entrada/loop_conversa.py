@@ -15,6 +15,7 @@ from jarvis.ia.motor import motor_pensamento
 from jarvis.memoria.embeddings import fatiar_e_buscar_documento
 from jarvis.integracoes.groq_status import verificar_saude_api
 from jarvis.entrada.captura_tela import pega_print
+from jarvis.integracoes.controle_pc import executar_acao_pc, ferramentas_controle_pc, NOMES_ACOES_PC
 
 
 def _callback_cli(tipo, **dados):
