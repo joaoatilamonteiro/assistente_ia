@@ -10,12 +10,14 @@ from jarvis.utils.texto import monta_historico_slim, parece_recusa
 from jarvis.utils.motor_latex import latex_para_unicode
 from jarvis.ia.roteador import interpreta_comando_rapido, comprime_memoria
 from jarvis.ia.ferramentas import ferramentas_jarvis
+from jarvis.integracoes.controle_pc import executar_acao_pc, ferramentas_controle_pc, NOMES_ACOES_PC
 from jarvis.memoria.embeddings import gerar_embedding, buscar_memoria_semantica
 from jarvis.memoria.persistencia import carregar_historico, salvar_historico
 from jarvis.integracoes.google_calendar import (
     adicionar_multiplos_eventos, apagar_eventos_por_termo,
     editar_evento_por_termo, listar_proximos_eventos,
 )
+ferramentas = ferramentas_jarvis + ferramentas_controle_pc
 
 modelo_nuvem = "openai/gpt-oss-120b"
 
@@ -194,7 +196,7 @@ class motor_pensamento:
             model=modelo_nuvem,
             messages=info_api,
             temperature=0.7,
-            tools=ferramentas_jarvis,
+            tools=ferramentas,
             tool_choice="auto",
             max_completion_tokens=2000,
             top_p=1,
@@ -211,7 +213,7 @@ class motor_pensamento:
             model=modelo_local,
             messages=info_api,
             temperature=0.7,
-            tools=ferramentas_jarvis,
+            tools=ferramentas,
             tool_choice="auto",
             stream=True,
             timeout=60.0,
@@ -244,9 +246,10 @@ class motor_pensamento:
                         ferramentas_acionadas[idx]["arguments"] += tc.function.arguments
         return resposta, ferramentas_acionadas
 
-        # ----------------- ferramentas (calendário) -----------------
+        # ----------------- ferramentas (calendário,controle) -----------------
 
     def executar_ferramenta(self, nome, argumentos_json):
+
         executor = executores_ferramentas.get(nome)
         if not executor:
             return f"Ferramenta desconhecida: {nome}"
