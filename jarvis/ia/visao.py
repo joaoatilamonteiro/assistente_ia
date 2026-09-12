@@ -5,10 +5,10 @@ from jarvis.utils.animacao import LoadingAnimado
 from jarvis.utils.texto import verifica_qualidade_resposta
 
 
-def analisar_imagem(caminho_arquivo, extensao, img_base64):
+def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None):
     mime_tipo = mimetypes.guess_type(f"arquivo{extensao}")[0] or "image/jpeg"
     data_url = f"data:{mime_tipo};base64,{img_base64}"
-    prompt_visao = (
+    prompt_visao = prompt or (
         "Você é um leitor óptico. Transcreva TODO o texto desta imagem. "
         "Se houver matemática, escreva rigorosamente em LaTeX. Apenas transcreva o que vê."
     )
@@ -75,3 +75,4 @@ def analisar_imagem(caminho_arquivo, extensao, img_base64):
     except Exception as erro_cloud_visao:
         loading.parar()
         return f"não foi possivel interpretar a imagem nem na nuvem e nem localmente via Ollama\nErro:{erro_cloud_visao}", "erro"
+
