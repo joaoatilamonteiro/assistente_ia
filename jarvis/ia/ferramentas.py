@@ -60,6 +60,25 @@ ferramentas_jarvis = [
     {
         "type": "function",
         "function": {
+            "name": "pesquisar_na_web",
+            "description": (
+                "Pesquisa informação ATUAL/EM TEMPO REAL na internet (notícias, "
+                "resultados de jogos, preços, eventos recentes, ou qualquer coisa "
+                "que possa ter mudado depois do seu treinamento). Use isso sempre "
+                "que o usuário perguntar algo que depende de informação atualizada."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pergunta": {"type": "string", "description": "A pergunta ou termo a pesquisar na web."}
+                },
+                "required": ["pergunta"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "listar_proximos_eventos",
             "description": "Lista os próximos eventos futuros da agenda do Google do usuário. Use quando o usuário perguntar 'quando é', 'o que tenho marcado', 'quais eventos', etc.",
             "parameters": {
