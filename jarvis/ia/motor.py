@@ -4,7 +4,7 @@ from datetime import datetime
 
 from jarvis.config import (
     client_local, client, modelo_local, regras_base,
-    prompts_especialistas, carregar_capacidades_ia,
+    prompts_especialistas, carregar_capacidades_ia,carregar_usuario
 )
 from jarvis.utils.texto import monta_historico_slim, parece_recusa
 from jarvis.utils.motor_latex import latex_para_unicode
@@ -17,6 +17,8 @@ from jarvis.integracoes.google_calendar import (
     adicionar_multiplos_eventos, apagar_eventos_por_termo,
     editar_evento_por_termo, listar_proximos_eventos,
 )
+from jarvis.web.pesquisa_web import pesquisa_web
+
 ferramentas = ferramentas_jarvis + ferramentas_controle_pc
 
 modelo_nuvem = "openai/gpt-oss-120b"
@@ -34,6 +36,7 @@ executores_ferramentas = {
     "listar_proximos_eventos":lambda a: listar_proximos_eventos(
         termo_busca=a.get("termo_busca"), dias_frente=a.get("dias_frente", 90)
     ),
+    "pesquisar_na_web": lambda a: pesquisa_web(pergunta=a.get("pergunta"))
 }
 
 class motor_pensamento:
@@ -42,6 +45,7 @@ class motor_pensamento:
         self.memoria_curto_p = ""
         self.modo_ia = "auto"  # auto, local, nuvem
         self.capacidades_ia = carregar_capacidades_ia()
+        self.usuario = carregar_usuario()
         self._on_evento = on_evento or (lambda tipo, **kw: None)
         self._on_texto = on_texto or (lambda pedaco: None)
 
@@ -163,6 +167,8 @@ class motor_pensamento:
         )
 
         info_api = [{"role": "system", "content": prompt_dinamico}]
+        if self.usuario:
+            info_api.append({"role":"system", "content":self.usuario})
         if self.capacidades_ia:
             info_api.append({"role": "system", "content": self.capacidades_ia})
         if self.memoria_curto_p:
@@ -271,43 +277,47 @@ class motor_pensamento:
         except Exception as e:
             return f"Erro na função {nome}: {e}"
 
-    def resolver_ferramentas(self, info_api, ferramentas_acionadas, client_usado, modelo_usado):
-        self._emit("acionando_ferramentas", ferramentas=[f["name"] for f in ferramentas_acionadas.values()])
+    def resolver_ferramentas(self, info_api, ferramentas_acionadas, client_usado, modelo_usado, max_rodada =5):
+        rodada = 0
 
-        info_api.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
-                }
-                for tc in ferramentas_acionadas.values()
-            ],
-        })
+        while ferramentas_acionadas and rodada <max_rodada:
+            rodada+=1
+            self._emit("acionando_ferramentas", ferramentas=[f["name"] for f in ferramentas_acionadas.values()])
 
-        for tc in ferramentas_acionadas.values():
-            resultado = self.executar_ferramenta(tc["name"], tc["arguments"])
-            self._emit("ferramenta_executada", nome=tc["name"], resultado=str(resultado))
             info_api.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "name": tc["name"],
-                "content": str(resultado),
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                    }
+                    for tc in ferramentas_acionadas.values()
+                ],
             })
 
-        self._emit("recebendo_confirmacao_final")
-        kwargs = dict(model=modelo_usado, messages=info_api, temperature=0.7,
-                      tools=ferramentas, stream=True)
-        if client_usado is client:
-            kwargs["max_completion_tokens"] = 2000
-        else:
-            kwargs["timeout"] = 60.0
+            for tc in ferramentas_acionadas.values():
+                resultado = self.executar_ferramenta(tc["name"], tc["arguments"])
+                self._emit("ferramenta_executada", nome=tc["name"], resultado=str(resultado))
+                info_api.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "name": tc["name"],
+                    "content": str(resultado),
+                })
 
-        completion_final = client_usado.chat.completions.create(**kwargs)
-        resposta_final, _ = self.consumir_stream(completion_final)
-        return resposta_final
+            self._emit("recebendo_confirmacao_final")
+            kwargs = dict(model=modelo_usado, messages=info_api, temperature=0.7,
+                          tools=ferramentas, tool_choice = "auto",stream=True)
+            if client_usado is client:
+                kwargs["max_completion_tokens"] = 2000
+            else:
+                kwargs["timeout"] = 60.0
+
+            completion_final = client_usado.chat.completions.create(**kwargs)
+            resposta_final, ferramentas_acionadas = self.consumir_stream(completion_final)
+        return resposta_final or "Não consegui concluir a solicitação completa - muitas ações"
 
         # ----------------- persistência -----------------
 
