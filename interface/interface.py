@@ -3,12 +3,15 @@ import base64
 import os
 import random
 from datetime import datetime
+import ctypes
+
 
 import PyPDF2
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
+from textual.containers import Vertical
 from textual.widgets import Footer, Header, RichLog, Static, TextArea
 
 # Imports do Jarvis (Ajuste os caminhos se necessário)
@@ -16,7 +19,6 @@ from jarvis.config import client
 from jarvis.ia.motor import motor_pensamento
 from jarvis.ia.visao import analisar_imagem
 from jarvis.integracoes.groq_status import verificar_saude_api
-from jarvis.memoria.embeddings import fatiar_e_buscar_documento
 from jarvis.entrada.captura_tela import pega_print
 
 import threading
@@ -113,6 +115,7 @@ class PainelComandos(Static):
 
 
 
+
 class JarvisTUI(App):
 
     TITLE = "Adomo"
@@ -189,28 +192,21 @@ class JarvisTUI(App):
         self._confirmacao_pendente = None
 
     def confirmar_acao_pc(self, descricao: str, categoria: str) -> bool:
-        """Chamado de dentro da worker thread do motor (asyncio.to_thread).
-        call_from_thread salta pro event loop principal do Textual pra
-        mostrar o modal, e bloqueia a worker thread até o usuário responder."""
-        evento = threading.Event()
-        resposta = {"valor":False}
+        """Abre uma caixa de diálogo NATIVA do Windows (fora do Textual),
+        bloqueando essa thread até o usuário clicar Sim ou Não.
+        Como é uma janela do próprio Windows, sempre responde a mouse/teclado,
+        sem depender do event loop da TUI."""
+        MB_YESNO = 0x04
+        MB_ICONWARNING = 0x30
+        MB_TOPMOST = 0x40000  # garante que a janela aparece na frente de tudo
 
-        def preparar():
-            self._confirmacao_pendente = {"evento": evento, "resposta": resposta}
-            log = self.query_one("#log", RichLog)
-            log.write(f"[bold red]🔒 CONFIRMAÇÃO NECESSÁRIA[/bold red] — categoria: {categoria.upper()}")
-            log.write(descricao)
-            log.write("[dim]Responda [bold]sim[/bold] ou [bold]não[/bold] no campo de mensagem.[/dim]")
-            entrada = self.query_one("#entrada", TextArea)
-            entrada.disabled = False
-            entrada.can_focus = True
-            entrada.focus()
-            self.call_after_refresh(entrada.focus)
-            self.set_timer(0.1, entrada.focus)
-
-        self.call_from_thread(preparar)
-        evento.wait()
-        return resposta["valor"]
+        texto = f"{descricao}\n\nAutorizar essa ação?"
+        resultado = ctypes.windll.user32.MessageBoxW(
+            0, texto, f"🔒 Confirmação necessária — {categoria.upper()}",
+            MB_YESNO | MB_ICONWARNING | MB_TOPMOST,
+        )
+        IDYES = 6
+        return resultado == IDYES
 
 
     def evento_motor(self, tipo: str, **dados):
@@ -257,27 +253,9 @@ class JarvisTUI(App):
         status = self.query_one("#status", PainelStatus)
         hora = datetime.now().strftime("%H:%M")
 
-
-        if self._confirmacao_pendente is not None:
-            entrada.text = ""
-            pendente = self._confirmacao_pendente
-            self._confirmacao_pendente = None
-            autorizado = pergunta.strip().lower() in ("sim", "s", "yes", "y")
-
-            log.write(f"[bold blue]Você[/bold blue] [dim]({hora})[/dim]: {pergunta}")
-            log.write("[bold green]✅ Autorizado.[/bold green]" if autorizado else "[bold red]❌ Cancelado.[/bold red]")
-
-            pendente["resposta"]["valor"] = autorizado
-            pendente["evento"].set()
-            entrada.focus()
-            return
-
         entrada.text = ""
         entrada.disabled = True
 
-
-        entrada.text = ""
-        entrada.disabled = True
         pergunta_para_motor = pergunta
         ignora_qwen = False
 
@@ -343,52 +321,7 @@ class JarvisTUI(App):
                                        "Analise esse conteúdo e me pergunte como deseja prosseguir.")
                 ignora_qwen = True
 
-            elif comando == "arquivo":
-                if not argumento:
-                    log.write("[bold red]⚠️ Forneça o caminho do arquivo. Ex: \\arquivo C:\\caminho.pdf[/bold red]")
-                    entrada.disabled = False
-                    entrada.focus()
-                    return
 
-                caminho = argumento.strip('"').strip("'")
-                extensao = os.path.splitext(caminho)[1].lower()
-                status.acao_atual = f"Carregando {extensao}..."
-
-                try:
-                    if extensao == ".pdf":
-                        leitura_arquivo = ""
-                        with open(caminho, "rb") as arquivo:
-                            leitor_pdf = PyPDF2.PdfReader(arquivo)
-                            for pagina in leitor_pdf.pages:
-                                txt = pagina.extract_text()
-                                if txt: leitura_arquivo += txt + "\n"
-
-                        log.write(f"[dim]PDF carregado. {len(leitura_arquivo)} caracteres.[/dim]")
-                        # Na TUI, para evitar bloquear pedindo o que buscar, passamos direto pro RAG um comando genérico
-                        # Ou você pode pedir pro usuário colocar na mesma linha: \arquivo C:\doc.pdf resumo
-                        # Aqui faremos um fallback genérico para não travar a UI:
-                        trechos = await asyncio.to_thread(fatiar_e_buscar_documento, leitura_arquivo,
-                                                          "resumo principal", 3)
-                        pergunta_para_motor = f"Arquivo enviado: {caminho}.\nCom base nos trechos:\n{trechos}\nFaça um resumo geral do que se trata."
-                        ignora_qwen = True
-
-                    elif extensao in [".txt", ".md"]:
-                        with open(caminho, "r", encoding="utf-8") as f:
-                            conteudo = f.read()
-                        pergunta_para_motor = f"Arquivo enviado ({caminho}).\nConteúdo:\n{conteudo[:4000]}\nAnalise o arquivo."
-                        ignora_qwen = True
-
-                    else:
-                        log.write(f"[bold red]⚠️ Arquivo não suportado pela TUI no momento: {extensao}[/bold red]")
-                        entrada.disabled = False
-                        entrada.focus()
-                        return
-
-                except Exception as e:
-                    log.write(f"[bold red]❌ Erro ao ler arquivo: {e}[/bold red]")
-                    entrada.disabled = False
-                    entrada.focus()
-                    return
 
             else:
                 log.write(f"[bold red]⚠️ Comando inválido.[/bold red]")
