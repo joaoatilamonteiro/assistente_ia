@@ -25,11 +25,17 @@ arquivo_memoria = os.path.join(PASTA_DATA, "historico.json")
 
 # Antes era "CAPACIDADES_IA.md" na raiz solta - agora mora em docs/
 ARQUIVO_CAPACIDADES = os.path.join(PASTA_DOCS, "CAPACIDADES_IA.md")
+ARQUIVO_USUARIO = os.path.join(PASTA_DOCS, "USUARIO.MD")
 
 # Antes eram "credenciais.json" e "token.json" soltos na raiz - agora em data/credenciais/
 ARQUIVO_CREDENCIAIS = os.path.join(PASTA_CREDENCIAIS, "credenciais.json")
 ARQUIVO_TOKEN = os.path.join(PASTA_CREDENCIAIS, "token.json")
 
+def carregar_usuario():
+    if os.path.exists(ARQUIVO_USUARIO):
+        with open(ARQUIVO_USUARIO, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
 
 def carregar_capacidades_ia():
     if os.path.exists(ARQUIVO_CAPACIDADES):
@@ -42,7 +48,7 @@ def carregar_capacidades_ia():
 # CLIENTES DE IA
 # ==========================================
 client_local = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama", timeout=30.0)
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 
 modelo_local = "qwen2.5:latest"
 modelo_visao_local = "qwen2.5vl:7b"
