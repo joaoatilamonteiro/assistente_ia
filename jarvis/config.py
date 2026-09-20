@@ -35,12 +35,16 @@ def carregar_usuario():
     if os.path.exists(ARQUIVO_USUARIO):
         with open(ARQUIVO_USUARIO, "r", encoding="utf-8") as f:
             return f.read().strip()
+    else:
+        print("Arquivo não encontrado")
     return ""
 
 def carregar_capacidades_ia():
     if os.path.exists(ARQUIVO_CAPACIDADES):
         with open(ARQUIVO_CAPACIDADES, "r", encoding="utf-8") as f:
             return f.read().strip()
+    else:
+        print("Arquivo não encontrado")
     return ""
 
 
