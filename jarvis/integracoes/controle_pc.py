@@ -92,7 +92,7 @@ def localizar_na_tela(descricao_alvo):
             f"Responda APENAS no formato: X,Y (coordenadas de pixel do centro do elemento). "
             f"Se não encontrar, responda: NAO_ENCONTRADO."
         )
-        resultado, origem = analisar_imagem(caminho, ".png", img_base64, prompt=prompt)
+        resultado,origem = analisar_imagem(caminho,".png",img_base64, prompt = prompt, timeout_local=15,max_tokens= 150)
         return resultado
     finally:
         if os.path.exists(caminho):
@@ -138,7 +138,7 @@ def _tirar_print_temporaria():
     pyautogui.screenshot(caminho)
     return caminho
 
-def verificar_abertura(descricao_esperada, espera_segundos = 2.5):
+def verificar_abertura(descricao_esperada, espera_segundos = 1.5):
     _checar_pyautogui()
     time.sleep(espera_segundos)
     caminho = _tirar_print_temporaria()
@@ -153,7 +153,7 @@ def verificar_abertura(descricao_esperada, espera_segundos = 2.5):
             f"Responda começando com 'SIM' ou 'NÃO' em maiúsculas, seguido de uma "
             f"frase curta explicando o que você vê na tela que te levou a essa conclusão."
         )
-        resultado,origem = analisar_imagem(caminho,".png",img_base64, prompt = prompt_verificacao)
+        resultado,origem = analisar_imagem(caminho,".png",img_base64, prompt = prompt_verificacao, timeout_local=15,max_tokens= 150)
         return resultado, origem
 
     finally: #nao sabia dessa, ela executa independente o que aconteça, com erro ou nao ela vai tentar exlcuir o arquivo
@@ -216,7 +216,7 @@ def ler_arquivo(caminho, pergunta_busca = "resumo principal"):
             return f"Tipo de arquivo não suportado ainda: '{extensao}'. Suportados: .pdf, .txt, .md, .html, .py, .js, .css, .json, .csv."
 
     except Exception as e:
-        return f"erro ao ler o arquivo '{caminho}\nerro:{e}'"
+        return f"erro ao ler o arquivo '{caminho}'\nerro:{e}"
 
 def listar_arquivos(pasta):
     try:
@@ -227,7 +227,16 @@ def listar_arquivos(pasta):
     except Exception as e:
         return f"Erro ao listar '{pasta}': {e}"
 
+_EXTENSOES_BINARIAS_NAO_SUPORTADAS = {".docx", ".xlsx", ".pptx", ".pdf", ".zip",".png",".jpg", ".jpeg"}
+
 def criar_arquivo(caminho, conteudo =""):
+    extensao = os.path.splitext(caminho)[1].lower()
+    if extensao in _EXTENSOES_BINARIAS_NAO_SUPORTADAS:
+        return (f"⚠️ '{extensao}' é um formato binário — criar_arquivo só escreve "
+                f"texto simples (UTF-8) e vai gerar um arquivo CORROMPIDO com essa "
+                f"extensão (não vai abrir corretamente no programa associado). "
+                f"Use .txt, .md, .html, .py, .js, .css, .json ou .csv, ou informe "
+                f"ao usuário que esse formato ainda não é suportado.")
     try:
         pasta = os.path.dirname(caminho)
         if pasta and not os.path.exists(pasta):
