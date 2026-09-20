@@ -227,10 +227,10 @@ class JarvisTUI(App):
         if tipo == "memoria_encontrada":
             resumo = dados.get("resumo", "")[:200]
             self.call_from_thread(setattr, memoria, "ultima_memoria", resumo or "Achei algo, mas sem resumo.")
-        elif tipo == "ferramenta_executada":
+        elif tipo == "ferramenta_repetida":
             self.call_from_thread(
                 self.query_one("#log", RichLog).write,
-                f"[dim]🛠️ {dados.get('nome')} -> {dados.get('resultado')}[/dim]",
+                f"[bold yellow]⚠️ '{dados.get('nome')}' foi chamada {dados.get('vezes')}x nesta resposta[/bold yellow]",
             )
         elif tipo == "erro_nuvem" or tipo == "erro_local":
             self.call_from_thread(
@@ -333,8 +333,6 @@ class JarvisTUI(App):
         log.write(f"[bold blue]Você[/bold blue] [dim]({hora})[/dim]: {pergunta}")
 
         status.acao_atual = random.choice(FRASES_PENSANDO)
-        inicio = asyncio.get_event_loop().time()
-
 
         try:
             self._resposta_streaming = ""
@@ -363,7 +361,7 @@ class JarvisTUI(App):
         except Exception as erro:
             resposta = f"[bold red]Falha no processamento: {erro}[/bold red]"
             houve_erro = True
-        duracao = asyncio.get_event_loop().time() - inicio
+        duracao = resultado.get("duracao",0) if not houve_erro else 0 
         log.write(f"[bold green]Adomo[/bold green] [dim]({hora})[/dim]:")
         if houve_erro:
             log.write(resposta)
