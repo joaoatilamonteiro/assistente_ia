@@ -2,8 +2,9 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import os
-base_dir = os.getcwd()
+base_dir = os.path.dirname(os.path.abspath(__file__))
 caminho_modelo = os.path.join(base_dir,"jarvis", "memoria", "modelo_memoria")
+modelo_embedding = None
 try:
     modelo_embedding = SentenceTransformer(caminho_modelo)
     print("modelo carregado localmente com sucesso")
@@ -14,7 +15,7 @@ except Exception as e:
         modelo_embedding.save(caminho_modelo)
         print("Modelo salvo com sucesso")
     except Exception as e_download:
-        print(f"Erro ao baixar e salvar o modelo\nerro:{e}")
+        print(f"Erro ao baixar e salvar o modelo\nerro:{e_download}")
 
 def gerar_embedding(texto):
     return modelo_embedding.encode(texto).tolist()
@@ -57,27 +58,21 @@ def buscar_memoria_semantica(pergunta, historico, top_k=3):
 
 def fatiar_e_buscar_documento(texto_gigante, pergunta_usuario, top_k=3):
 
-    # 1. Chunking: Pica o texto em pedaços de 1500 caracteres (aprox. 400 tokens)
     tamanho_pedaco = 1500
     pedacos = [texto_gigante[i:i + tamanho_pedaco] for i in range(0, len(texto_gigante), tamanho_pedaco)]
 
-    print(f"✂️ Documento dividido em {len(pedacos)} pedaços. Vetorizando...")
+    print(f"Documento dividido em {len(pedacos)} pedaços. Vetorizando...")
 
-    # 2. Gera o vetor da pergunta
     vetor_pergunta = np.array(gerar_embedding(pergunta_usuario))
 
-    # 3. Vetoriza TODOS os pedaços de uma vez (batch) em vez de um a um -
-    # o modelo de embedding processa lotes muito mais rápido que chamadas soltas
     matriz_pedacos = np.array(modelo_embedding.encode(pedacos))
 
     normas = np.linalg.norm(matriz_pedacos, axis=1) * np.linalg.norm(vetor_pergunta)
     normas[normas == 0] = 1e-10
     similaridades = (matriz_pedacos @ vetor_pergunta) / normas
 
-    # 4. Pega só os pedaços que mais batem com a pergunta
     indices_ordenados = np.argsort(similaridades)[::-1][:top_k]
-    melhores_pedacos = [pedacos[i] for i in indices_ordenados]
+    melhores_pedacos = [pedacos[i] for i in sorted(indices_ordenados)]
 
-    # 5. Costura os melhores pedaços juntos
     texto_filtrado = "\n\n...[Corte]...\n\n".join(melhores_pedacos)
     return texto_filtrado
