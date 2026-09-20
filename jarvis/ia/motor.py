@@ -188,8 +188,9 @@ class motor_pensamento:
     def montar_mensagens_fallback_local(self, info_api, pergunta, historico_enxuto):
         # Mesmo espírito do fallback original: um payload mais enxuto pro Ollama.
         info_local = [info_api[0]]
-        if len(info_api) > 1 and "ATENÇÃO MÁXIMA" in info_api[1].get("content", ""):
-            info_local.append(info_api[1])
+        for msg in info_api[1:]:
+            if msg.get("role") == "system" and "ATENÇÃO MÁXIMA" in msg.get("content", ""):
+                info_local.append(msg)
         for hist in historico_enxuto[-4:]:
             if hist.get("role") == "assistant" and parece_recusa(hist.get("content", "")):
                 continue
@@ -280,6 +281,7 @@ class motor_pensamento:
     def resolver_ferramentas(self, info_api, ferramentas_acionadas, client_usado, modelo_usado, max_rodada =5):
         rodada = 0
 
+        contagem_nomes_total = {}
         while ferramentas_acionadas and rodada <max_rodada:
             rodada+=1
             self._emit("acionando_ferramentas", ferramentas=[f["name"] for f in ferramentas_acionadas.values()])
@@ -300,6 +302,11 @@ class motor_pensamento:
             for tc in ferramentas_acionadas.values():
                 resultado = self.executar_ferramenta(tc["name"], tc["arguments"])
                 self._emit("ferramenta_executada", nome=tc["name"], resultado=str(resultado))
+                contagem_nomes_total[tc["name"]] = contagem_nomes_total.get(tc["name"], 0) + 1
+
+                if contagem_nomes_total[tc["name"]] > 1:
+                    self._emit("ferramenta_repetida", nome=tc["name"], vezes=contagem_nomes_total[tc["name"]])
+
                 info_api.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
