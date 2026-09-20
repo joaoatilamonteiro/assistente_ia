@@ -1,5 +1,7 @@
 import re
 
+import math
+
 _SUPER = {
     "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶",
     "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
@@ -30,29 +32,31 @@ _GREGO = {
 }
 
 _SIMBOLOS = {
+    # Setas
     r"\leftrightarrow": "↔",
     r"\Leftrightarrow": "⇔",
-
     r"\rightarrow": "→",
     r"\Rightarrow": "⇒",
     r"\longrightarrow": "⟶",
     r"\Longrightarrow": "⟹",
-
     r"\leftarrow": "←",
     r"\Leftarrow": "⇐",
     r"\longleftarrow": "⟵",
     r"\Longleftarrow": "⟸",
-
     r"\longleftrightarrow": "⟷",
     r"\Longleftrightarrow": "⟺",
-
     r"\to": "→",
+    r"\implies": "⟹",
+    r"\iff": "⟺",
 
+    # Operadores aritméticos
     r"\times": "×",
     r"\cdot": "·",
     r"\div": "÷",
     r"\pm": "±",
     r"\mp": "∓",
+
+    # Comparação
     r"\leq": "≤",
     r"\le": "≤",
     r"\geq": "≥",
@@ -63,6 +67,9 @@ _SIMBOLOS = {
     r"\equiv": "≡",
     r"\cong": "≅",
     r"\sim": "∼",
+    r"\propto": "∝",
+
+    # Cálculo / análise
     r"\infty": "∞",
     r"\partial": "∂",
     r"\nabla": "∇",
@@ -70,16 +77,65 @@ _SIMBOLOS = {
     r"\prod": "∏",
     r"\oint": "∮",
     r"\int": "∫",
+
+    # Teoria dos conjuntos
+    r"\subseteq": "⊆",
+    r"\supseteq": "⊇",
+    r"\subsetneq": "⊊",
+    r"\supsetneq": "⊋",
+    r"\subset": "⊂",
+    r"\supset": "⊃",
+    r"\cup": "∪",
+    r"\cap": "∩",
+    r"\bigcup": "⋃",
+    r"\bigcap": "⋂",
+    r"\setminus": "∖",
+    r"\emptyset": "∅",
+    r"\varnothing": "∅",
     r"\in": "∈",
     r"\notin": "∉",
+    r"\ni": "∋",
+
+    # Lógica
+    r"\forall": "∀",
+    r"\exists": "∃",
+    r"\nexists": "∄",
+    r"\lnot": "¬",
+    r"\neg": "¬",
+    r"\land": "∧",
+    r"\lor": "∨",
+    r"\wedge": "∧",
+    r"\vee": "∨",
+    r"\therefore": "∴",
+    r"\because": "∵",
+
+    # Reticências / pontuação matemática
+    r"\ldots": "…",
+    r"\cdots": "⋯",
+    r"\vdots": "⋮",
+    r"\ddots": "⋱",
+
+    # Conjuntos numéricos (\mathbb)
+    r"\mathbb{N}": "ℕ",
+    r"\mathbbN": "ℕ",
     r"\mathbb{Z}": "ℤ",
     r"\mathbbZ": "ℤ",
+    r"\mathbb{Q}": "ℚ",
+    r"\mathbbQ": "ℚ",
     r"\mathbb{R}": "ℝ",
     r"\mathbbR": "ℝ",
-    r"\implies": "⟹",
-    r"\iff": "⟺",
-}
+    r"\mathbb{C}": "ℂ",
+    r"\mathbbC": "ℂ",
 
+    # Geometria / diversos
+    r"\degree": "°",
+    r"\perp": "⊥",
+    r"\parallel": "∥",
+    r"\angle": "∠",
+    r"\triangle": "△",
+    r"\otimes": "⊗",
+    r"\oplus": "⊕",
+}
 
 _COMANDOS_MUDOS = [
     r"\left", r"\right", r"\displaystyle", r"\textstyle",
@@ -94,7 +150,7 @@ _FUNCOES = [
     "max", "min", "sup", "inf", "det", "gcd", "arg", "mod",
 ]
 # comandos que só "envolvem" o conteúdo (\text{x}, \mathcal{F}...) - mantém só o argumento
-_ENVOLVENTES = ["text", "mathrm", "mathbf", "mathcal", "mathit", "boldsymbol", "operatorname"]
+_ENVOLVENTES = ["text", "mathrm", "mathbf", "mathcal", "mathit", "boldsymbol", "operatorname", "boxed"]
 
 # placeholders pra proteger \{ e \} (chaves de conjunto, tipo \{1,2,3\}) da limpeza
 # de chaves de agrupamento do latex (\frac{...}, \sqrt{...}) que roda no final
@@ -105,13 +161,16 @@ def _resolve_big_delims(expr):
     """Remove o "tamanho" de \\bigl( \\Bigr] \\biggl\\{ etc, mantendo só o delimitador."""
     return re.sub(r"\\(?:Bigg|bigg|Big|big)[lrm]?", "", expr)
 
-def _resolve_boxed(expr):
+def _resolve_binom_frac(expr, padrao, formatar):
     saida = []
     i = 0
     while i < len(expr):
-        if expr[i:i + 6] == r"\boxed":
-            arg, j = _pega_argumento(expr, i + 6)
-            saida.append(f"⟦{_converter_expressao(arg)}⟧")
+        match = re.match(padrao, expr[i:])
+        if match:
+            tamanho_comando = len(match.group(0))
+            arg1, j = _pega_argumento(expr, i + tamanho_comando)
+            arg2, j = _pega_argumento(expr, j)
+            saida.append(formatar(_converter_expressao(arg1), _converter_expressao(arg2)))
             i = j
         else:
             saida.append(expr[i])
@@ -162,6 +221,8 @@ def _resolve_envolventes(expr):
     return "".join(saida)
 
 
+
+
 def _converter_expressao(expr):
     # protege \{ e \} (chaves de conjunto, ex: \{1,2,3\}) antes de qualquer coisa,
     # senão a limpeza de chaves de agrupamento no final ia apagar elas também
@@ -174,11 +235,11 @@ def _converter_expressao(expr):
     expr = _resolve_big_delims(expr)
     for nome in _FUNCOES:
         expr = re.sub(rf"\\{nome}(?![a-zA-Z])", nome, expr)
-    expr = _resolve_boxed(expr)
+    expr = _resolve_binom_frac(expr, r"\\([dt]?frac)", lambda a, b: f"({a}/{b})")
     expr = _resolve_brace_commands(expr, "underbrace")
     expr = _resolve_brace_commands(expr, "overbrace")
     expr = _resolve_envolventes(expr)
-    expr = _resolve_frac(expr)
+    expr = _resolve_binom_frac(expr, r"\\binom", lambda a, b: f"C({a},{b})")
     expr = _resolve_sqrt(expr)
     expr = _resolve_super_sub(expr, "^", _SUPER)
     expr = _resolve_super_sub(expr, "_", _SUB)
@@ -221,23 +282,6 @@ def _pega_argumento(texto, pos):
             return m.group(0), pos +len(m.group(0))
     return texto[pos], pos +1
 
-#realiza a conversao de expressoes matematicas em geral
-def _resolve_frac(expressao):
-    saida = []
-    i = 0
-    while i < len(expressao):
-        # O regex captura \frac, \dfrac ou \tfrac
-        match = re.match(r"\\([dt]?frac)", expressao[i:])
-        if match:
-            tamanho_comando = len(match.group(0))
-            arg1, j = _pega_argumento(expressao, i + tamanho_comando)
-            arg2, j = _pega_argumento(expressao, j)
-            saida.append(f"({_converter_expressao(arg1)}/{_converter_expressao(arg2)})")
-            i = j
-        else:
-            saida.append(expressao[i])
-            i += 1
-    return "".join(saida)
 
 def _resolve_sqrt(expr):
     saida = []
@@ -307,7 +351,7 @@ _PADRAO_MATH = re.compile(
     r"|\\\[(?P<colch>.+?)\\\]"
     r"|\$(?P<dolar>.+?)\$"
     r"|\\\((?P<par>.+?)\\\)"
-    r"|\\begin\{(?P<env>aligned|align\*?|gather\*?|split)\}(?P<envcont>.+?)\\end\{(?P=env)\}",
+    r"|\\begin\{(?P<env>aligned|align\*?|gather\*?|split|array)\}(?P<envcont>.+?)\\end\{(?P=env)\}",
     re.DOTALL,
 )
 
@@ -329,8 +373,8 @@ def latex_para_unicode(texto):
         if conteudo_normal is not None:
             # Protege os ambientes no meio do bloco normal antes de converter tudo
             conteudo_protegido = re.sub(
-                r"\\begin\{(?P<env>aligned|align\*?|gather\*?|split)\}(?P<conteudo>.*?)\\end\{(?P=env)\}",
-                lambda match: "\n" + _processar_ambiente(match.group("conteudo")) + "\n",
+                r"\\begin\{(?P<env>aligned|align\*?|gather\*?|split|array)\}(?:\{[^}]*\})?(?P<envcont>.+?)\\end\{(?P=env)\}",
+                lambda match: "\n" + _processar_ambiente(match.group("envcont")) + "\n",
                 conteudo_normal,
                 flags=re.DOTALL
             )
