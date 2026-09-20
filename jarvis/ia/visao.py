@@ -5,7 +5,7 @@ from jarvis.utils.animacao import LoadingAnimado
 from jarvis.utils.texto import verifica_qualidade_resposta
 
 
-def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None):
+def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None, timeout_local = 90.0, max_tokens = 2048):
     mime_tipo = mimetypes.guess_type(f"arquivo{extensao}")[0] or "image/jpeg"
     data_url = f"data:{mime_tipo};base64,{img_base64}"
     prompt_visao = prompt or (
@@ -31,8 +31,8 @@ def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None):
                 }
             ],
             temperature=0.1,
-            max_tokens=2048,
-            timeout=90.0,  # visão local demora mais que texto, dá mais fôlego antes de desistir
+            max_tokens= max_tokens,
+            timeout=timeout_local
         )
         conteudo_imagem = resposta_visao.choices[0].message.content
     except Exception as erro_local_visao:
@@ -65,7 +65,7 @@ def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None):
                 }
             ],
             temperature=0.1,
-            max_completion_tokens=2048,
+            max_completion_tokens=max_tokens,
         )
         conteudo_imagem = resposta_visao_cloud.choices[0].message.content
         loading.parar()
