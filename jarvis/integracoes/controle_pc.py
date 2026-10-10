@@ -1,27 +1,24 @@
-"""
-Controle de mouse/teclado do Jarvis (RPA / "computer use"), via pyautogui.
-
-qualquer ação classificada como "enviar", "deletar",
-"instalar" ou "fechar" passa por confirmação no terminal ANTES de
-executar. Essa checagem está no codigo (dicionário CATEGORIA_ACAO +
-`if` em executar_acao_pc), não é uma instrução que a IA pode escolher
-seguir ou ignorar — mesmo que o modelo "decida" pular, o Python não deixa.
-
-Toda ação (sensível ou não) imprime uma descrição detalhada do que vai
-fazer, montada a partir dos argumentos reais recebidos (não do texto que
-a IA escreveu) — assim a descrição sempre bate com o que de fato roda.
-"""
 import base64
 import os
+import re
 import subprocess
 import tempfile
 import time
 import inspect
 import webbrowser
-
+import json
+from jarvis.config import ARQUIVO_SCHEMA_FERRAMENTAS
 from jarvis.ia.visao import analisar_imagem
 from jarvis.memoria.embeddings import fatiar_e_buscar_documento
 import PyPDF2
+from jarvis.config import modelo_visao_gui
+
+with open(ARQUIVO_SCHEMA_FERRAMENTAS, "r", encoding="utf-8") as _f:
+    _schema = json.load(_f)
+
+CATEGORIA_ACAO = _schema["categorias_acao"]
+_EXTENSOES_BINARIAS_NAO_SUPORTADAS = set(_schema["extensoes_binarias_nao_suportadas"])
+ferramentas_controle_pc = _schema["ferramentas_controle_pc"]
 
 try:
     import pyautogui
@@ -42,25 +39,7 @@ def _checar_pyautogui():
 # Categorias sensíveis. Se o nome da ação não está aqui como None,
 # ela SEMPRE pede confirmação — sem exceção, sem bypass por argumento.
 # --------------------------------------------------------------------
-CATEGORIA_ACAO = {
-    "ler_arquivo": None,
-    "mover_mouse": None,
-    "clicar": None,
-    "abrir_url": None,
-    "digitar_texto": None,
-    "pressionar_tecla": None,
-    "tirar_screenshot": None,
-    "posicao_mouse_atual": None,
-    "localizar_na_tela": None,
-    "listar_arquivos": None,
 
-    "criar_arquivo": "criar",
-    "abrir_programa": "abrir",
-    "enviar_texto_e_enter": "enviar",
-    "deletar_arquivo": "deletar",
-    "instalar_pacote": "instalar",
-    "fechar_janela_ativa": "fechar",
-}
 
 
 # --------------------------------------------------------------------
@@ -112,25 +91,65 @@ def digitar_texto(texto, intervalo=0.03):
     pyautogui.write(texto, interval=intervalo)
     return f"Digitei o texto ({len(texto)} caracteres)."
 
+def _eh_provavel_executavel(caminho_nome):
+    #funciona apenas para abrir programas, nao arquivos
+    _, extensao = os.path.splitext(caminho_nome)
+    return extensao.lower() == ".exe" or extensao == ""
+
+def _processo_esta_rodando(nome_processo):
+    #verifica pelo tasklist (windows) se ja ta rodando o processo, se nao ver o processo ele tenta dnv
+    if not nome_processo.lower().endswith(".exe"):
+        nome_processo += ".exe"
+    try:
+        resultado = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {nome_processo}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return nome_processo.lower() in resultado.stdout.lower()
+    except Exception:
+        return False
+
 def abrir_programa(caminho_nome):
+    if _eh_provavel_executavel(caminho_nome):
+        nome_processo = os.path.basename(caminho_nome)
+        if _processo_esta_rodando(nome_processo):
+            return (f"'{caminho_nome}' já está aberto/rodando agora. Não é "
+                     f"necessário abrir de novo — não chame esta ferramenta "
+                     f"outra vez para o mesmo programa.")
     try:
         os.startfile(caminho_nome)
-        return f"abri:{caminho_nome}"
+        return f"Programa/arquivo aberto com sucesso: {caminho_nome}. Ação concluída"
     except FileNotFoundError:
         try:
             subprocess.Popen(caminho_nome, shell=True)
-            return f"abri: {caminho_nome}"
+            return f"Programa/arquivo aberto com sucesso: {caminho_nome}. Ação concluída, não é necessário chamar de novo."
         except Exception as e:
             return f"Não consegui abrir '{caminho_nome}'\nerror: {e}"
 
-def abrir_url(url):
-    if "://" not in url:
-        url = "https://"+url
 
+def _parece_dominio_valido(texto):
+    if " " in texto:
+        return False
+    return bool(re.search(r"\.[a-zA-Z]{2,}", texto))
+
+def abrir_url(url):
+    if "://" in url:
+        dominio = url.split("://", 1)[1]
+    else:
+        dominio = url
+
+    if not _parece_dominio_valido(dominio):
+        url_busca = "https://www.google.com/search?q=" + dominio.replace(" ", "+")
+        webbrowser.open(url_busca)
+        return (f"'{url}' não parece um domínio válido, então abri uma busca no "
+                f"Google por '{dominio}' em vez de um endereço quebrado. Se você "
+                f"sabe o site exato, me diga o domínio (ex: rihappy.com.br).")
+
+    if "://" not in url:
+        url = "https://" + url
     webbrowser.open(url)
     resultado_verificacao, origem = verificar_abertura(f"o site {url} carregado no navegador")
     return f"Abri {url} no navegador padrão. Verificação visual ({origem}): {resultado_verificacao}"
-
 def _tirar_print_temporaria():
     _checar_pyautogui()
     fd, caminho = tempfile.mkstemp(suffix=".png", prefix="verificacao_")
@@ -153,7 +172,7 @@ def verificar_abertura(descricao_esperada, espera_segundos = 1.5):
             f"Responda começando com 'SIM' ou 'NÃO' em maiúsculas, seguido de uma "
             f"frase curta explicando o que você vê na tela que te levou a essa conclusão."
         )
-        resultado,origem = analisar_imagem(caminho,".png",img_base64, prompt = prompt_verificacao, timeout_local=15,max_tokens= 150)
+        resultado, origem = analisar_imagem(caminho, ".png", img_base64, prompt=prompt_verificacao, timeout_local=15,max_tokens=150, modelo_local=modelo_visao_gui)
         return resultado, origem
 
     finally: #nao sabia dessa, ela executa independente o que aconteça, com erro ou nao ela vai tentar exlcuir o arquivo
@@ -226,8 +245,6 @@ def listar_arquivos(pasta):
         return "\n".join(itens)
     except Exception as e:
         return f"Erro ao listar '{pasta}': {e}"
-
-_EXTENSOES_BINARIAS_NAO_SUPORTADAS = {".docx", ".xlsx", ".pptx", ".pdf", ".zip",".png",".jpg", ".jpeg"}
 
 def criar_arquivo(caminho, conteudo =""):
     extensao = os.path.splitext(caminho)[1].lower()
@@ -384,226 +401,6 @@ def executar_acao_pc(nome, argumentos, confirmar=_confirmar_no_terminal):
 # Schema de tools (mesmo formato de ferramentas_jarvis, pra combinar
 # as duas listas na chamada da Groq/Ollama)
 # --------------------------------------------------------------------
-ferramentas_controle_pc = [
-    {
-        "type": "function",
-        "function": {
-            "name": "listar_arquivos",
-            "description": "Lista os arquivos e subpastas dentro de uma pasta. Use isso ANTES de criar um arquivo novo, para conferir o que já existe e evitar duplicar arquivos parecidos com nomes diferentes.",
-            "parameters": {
-                "type": "object",
-                "properties": {"pasta": {"type": "string", "description": "Caminho absoluto da pasta a listar (ex: 'C:\\Users\\monte\\Desktop')."}},
-                "required": ["pasta"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ler_arquivo",
-            "description": (
-                "Lê o conteúdo de um arquivo do disco (.pdf, .txt, .md, .html, .py, "
-                ".js, .css, .json, .csv). Use isso sempre que o usuário mencionar um "
-                "caminho de arquivo na conversa, pedir para você analisar/resumir um "
-                "arquivo, ou quando você precisar reler o conteúdo real de um arquivo "
-                "que você mesmo criou antes (em vez de confiar apenas na memória da "
-                "conversa). Se o tipo de arquivo não for suportado, retorna um erro "
-                "claro em vez de inventar conteúdo."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "caminho": {"type": "string", "description": "Caminho absoluto do arquivo a ler."},
-                    "pergunta_busca": {"type": "string", "description": "Só usado para PDFs: o que buscar dentro do documento (ex: 'resumo principal', 'conclusão'). Padrão: resumo geral."},
-                },
-                "required": ["caminho"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "criar_arquivo",
-            "description": "[REQUER CONFIRMAÇÃO] Cria um arquivo de texto com o conteúdo especificado. Se o arquivo já existir, sobrescreve.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "caminho": {"type": "string", "description": "Caminho absoluto do arquivo a criar (ex: 'C:\\Users\\monte\\Desktop\\pagina.html')."},
-                    "conteudo": {"type": "string", "description": "Conteúdo de texto a escrever no arquivo."},
-                },
-                "required": ["caminho", "conteudo"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "abrir_programa",
-            "description": "[REQUER CONFIRMAÇÃO] Abre um programa instalado (por caminho completo do .exe, ou pelo nome se estiver no PATH, ex: 'notepad', 'calc') OU um arquivo com o programa padrão associado à sua extensão (ex: um .html abre no navegador padrão).",
-            "parameters": {
-                "type": "object",
-                "properties": {"caminho_nome": {"type": "string", "description": "Caminho do executável/arquivo ou nome do programa."}},
-                "required": ["caminho_nome"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mover_mouse",
-            "description": "Move o cursor do mouse para uma posição X,Y na tela.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {"type": "integer", "description": "Posição horizontal em pixels."},
-                    "y": {"type": "integer", "description": "Posição vertical em pixels."},
-                },
-                "required": ["x", "y"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "posicao_mouse_atual",
-            "description": "Retorna a posição X,Y ATUAL do mouse na tela. Use isso para saber onde o mouse está de verdade, em vez de adivinhar.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "localizar_na_tela",
-            "description": (
-                "Tira um screenshot da tela ATUAL e usa um modelo de visão para tentar "
-                "localizar a posição de pixel (x, y) aproximada de um elemento visual "
-                "descrito (ex: um botão, um texto, um item de lista, um ícone). "
-                "SEMPRE use esta ferramenta ANTES de chamar 'clicar' com coordenadas "
-                "específicas quando você não tiver certeza exata de onde o elemento está — "
-                "NUNCA invente ou chute coordenadas de pixel sem antes usar esta ferramenta "
-                "ou sem o usuário ter fornecido as coordenadas explicitamente. Esta ferramenta "
-                "pode retornar 'NAO_ENCONTRADO' se não conseguir localizar o elemento; nesse "
-                "caso, informe isso ao usuário em vez de clicar em qualquer lugar."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "descricao_alvo": {
-                        "type": "string",
-                        "description": "Descrição do elemento a localizar na tela (ex: 'botão de play do Spotify', 'campo de busca do navegador').",
-                    }
-                },
-                "required": ["descricao_alvo"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "abrir_url",
-            "description": "Abre uma URL/site no navegador padrão do usuário. Use isso para abrir qualquer site (ex: YouTube, UOL, Google).",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string", "description": "URL ou domínio do site a abrir."}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "clicar",
-            "description": "Clica com o mouse. Se x/y forem informados, move até lá antes de clicar.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {"type": "integer", "description": "Posição horizontal (opcional)."},
-                    "y": {"type": "integer", "description": "Posição vertical (opcional)."},
-                    "botao": {"type": "string", "enum": ["left", "right", "middle"]},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "digitar_texto",
-            "description": "Digita um texto no campo/janela em foco, SEM apertar Enter.",
-            "parameters": {
-                "type": "object",
-                "properties": {"texto": {"type": "string", "description": "Texto a digitar."}},
-                "required": ["texto"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "pressionar_tecla",
-            "description": "Pressiona uma tecla ou atalho (ex: 'enter', 'esc', 'ctrl+s', 'alt+tab').",
-            "parameters": {
-                "type": "object",
-                "properties": {"tecla": {"type": "string"}},
-                "required": ["tecla"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "tirar_screenshot",
-            "description": "Tira um screenshot da tela inteira e salva em disco, retornando o caminho.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "enviar_texto_e_enter",
-            "description": "[REQUER CONFIRMAÇÃO] Digita um texto e pressiona Enter - usado pra ENVIAR mensagens, comandos ou formulários.",
-            "parameters": {
-                "type": "object",
-                "properties": {"texto": {"type": "string", "description": "Texto a enviar."}},
-                "required": ["texto"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "deletar_arquivo",
-            "description": "[REQUER CONFIRMAÇÃO] Apaga permanentemente um arquivo do disco.",
-            "parameters": {
-                "type": "object",
-                "properties": {"caminho": {"type": "string", "description": "Caminho absoluto do arquivo."}},
-                "required": ["caminho"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "instalar_pacote",
-            "description": "[REQUER CONFIRMAÇÃO] Instala um pacote/programa via pip, winget ou choco.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "nome_pacote": {"type": "string"},
-                    "gerenciador": {"type": "string", "enum": ["pip", "winget", "choco"]},
-                },
-                "required": ["nome_pacote"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "fechar_janela_ativa",
-            "description": "[REQUER CONFIRMAÇÃO] Fecha a janela atualmente em foco (Alt+F4).",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-]
+
 
 NOMES_ACOES_PC = set(CATEGORIA_ACAO.keys())
