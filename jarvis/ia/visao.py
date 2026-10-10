@@ -1,11 +1,12 @@
 import mimetypes
 
-from jarvis.config import client_local, client, modelo_visao_local
+from jarvis.config import client_local, client, modelo_visao_documentos
 from jarvis.utils.animacao import LoadingAnimado
 from jarvis.utils.texto import verifica_qualidade_resposta
 
 
-def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None, timeout_local = 90.0, max_tokens = 2048):
+def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None, timeout_local = 90.0, max_tokens = 2048,modelo_local=None):
+
     mime_tipo = mimetypes.guess_type(f"arquivo{extensao}")[0] or "image/jpeg"
     data_url = f"data:{mime_tipo};base64,{img_base64}"
     prompt_visao = prompt or (
@@ -20,7 +21,7 @@ def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None, timeou
     loading.iniciar()
     try:
         resposta_visao = client_local.chat.completions.create(
-            model=modelo_visao_local,
+            model=modelo_local or modelo_visao_documentos,
             messages=[
                 {
                     "role": "user",
@@ -54,7 +55,7 @@ def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None, timeou
     loading.iniciar()
     try:
         resposta_visao_cloud = client.chat.completions.create(
-            model="qwen/qwen3.6-27b",
+            model="qwen/qwen3.8-27b",
             messages=[
                 {
                     "role": "user",
