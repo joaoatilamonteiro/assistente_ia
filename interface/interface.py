@@ -26,6 +26,7 @@ from jarvis.entrada.captura_tela import pega_print
 import threading
 import re
 from rich.markdown import Markdown
+from rich.text import Text
 from jarvis.utils.motor_latex import latex_para_unicode
 # ==========================================
 # "PERSONALIDADE" - frases de status/loading que refletem o tom do Jarvis
@@ -39,6 +40,16 @@ FRASES_EVENTO = _textos["frases_evento"]
 FRASES_FERRAMENTA = _textos["frases_ferramenta"]
 FRASES_PENSANDO = _textos["frases_pensando"]
 
+
+
+def markup_para_texto_plano(markup: str) -> str:
+    """Tira as tags de formatação do Rich ([bold red]...[/bold red]) e devolve só o texto.
+    Usa o parser do próprio Rich em vez de regex, pra não comer colchetes que são
+    parte do texto (ex: '[Errno 11001]')."""
+    try:
+        return Text.from_markup(markup).plain
+    except Exception:
+        return re.sub(r"\[/?[a-z#@][^\[\]]*\]", "", markup)
 
 
 class PainelStatus(Static):
@@ -185,8 +196,8 @@ class JarvisTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        log = self.query_one("#log", RichLog)
-        log.write("[bold green]Adomo:[/bold green] E aí! Tô de pé, sem frescura. Manda a boa.")
+        self._transcript_texto = ""  # histórico em texto puro (sem tags Rich) pro modo seleção (Ctrl+R)
+        self.escrever_log("[bold green]Adomo:[/bold green] E aí! Tô de pé, sem frescura. Manda a boa.")
         self.query_one("#entrada", TextArea).focus()
 
         self.motor = motor_pensamento(
@@ -197,7 +208,6 @@ class JarvisTUI(App):
         self._resposta_streaming= None
         self._confirmacao_pendente = None
         self._ultima_resposta_texto = None  # guarda o texto pra o atalho Ctrl+Y copiar
-        self._transcript_texto = ""  # histórico em texto puro (sem tags Rich) pro modo seleção
 
     def confirmar_acao_pc(self, descricao: str, categoria: str) -> bool:
         """Abre uma caixa de diálogo NATIVA do Windows (fora do Textual),
@@ -216,6 +226,13 @@ class JarvisTUI(App):
         IDYES = 6
         return resultado == IDYES
 
+
+    def escrever_log(self, markup: str) -> None:
+        """Escreve no log colorido E guarda a versão em texto puro na transcrição
+        (é a que aparece no modo Ctrl+R). Roda na thread principal - de dentro da
+        thread do motor, chame via self.call_from_thread(self.escrever_log, ...)."""
+        self.query_one("#log", RichLog).write(markup)
+        self._transcript_texto += markup_para_texto_plano(markup) + "\n\n"
 
     def evento_motor(self, tipo: str, **dados):
         status = self.query_one("#status", PainelStatus)
@@ -237,12 +254,12 @@ class JarvisTUI(App):
             self.call_from_thread(setattr, memoria, "ultima_memoria", resumo or "Achei algo, mas sem resumo.")
         elif tipo == "ferramenta_repetida":
             self.call_from_thread(
-                self.query_one("#log", RichLog).write,
+                self.escrever_log,
                 f"[bold yellow]⚠️ '{dados.get('nome')}' foi chamada {dados.get('vezes')}x nesta resposta[/bold yellow]",
             )
         elif tipo == "erro_nuvem" or tipo == "erro_local":
             self.call_from_thread(
-                self.query_one("#log", RichLog).write,
+                self.escrever_log,
                 f"[bold red]⚠️ {dados.get('erro', 'erro desconhecido')}[/bold red]",
             )
 
@@ -285,7 +302,7 @@ class JarvisTUI(App):
 
             elif comando == "esquece":
                 self.motor.esquecer_memoria_curta()
-                log.write(f"[dim italic]({hora}) 🧠 Memória de curto prazo resetada.[/dim italic]")
+                self.escrever_log(f"[dim italic]({hora}) 🧠 Memória de curto prazo resetada.[/dim italic]")
                 entrada.disabled = False
                 entrada.focus()
                 return
@@ -294,9 +311,9 @@ class JarvisTUI(App):
                 if argumento in ["auto", "local", "nuvem"]:
                     self.motor.definir_modo(argumento)
                     status.modo = argumento
-                    log.write(f"[dim italic]({hora}) ⚙️ Modo alterado para: {argumento}[/dim italic]")
+                    self.escrever_log(f"[dim italic]({hora}) ⚙️ Modo alterado para: {argumento}[/dim italic]")
                 else:
-                    log.write("[bold red]⚠️ Uso: \\modo auto | local | nuvem[/bold red]")
+                    self.escrever_log("[bold red]⚠️ Uso: \\modo auto | local | nuvem[/bold red]")
                 entrada.disabled = False
                 entrada.focus()
                 return
@@ -304,7 +321,7 @@ class JarvisTUI(App):
             elif comando == "saude":
                 status.acao_atual = "Consultando saúde Groq..."
                 relatorio = await asyncio.to_thread(verificar_saude_api, client)
-                log.write(f"[bold cyan]🩺 Saúde API:[/bold cyan]\n{relatorio}")
+                self.escrever_log(f"[bold cyan]🩺 Saúde API:[/bold cyan]\n{relatorio}")
                 status.acao_atual = "Aguardando..."
                 entrada.disabled = False
                 entrada.focus()
@@ -314,7 +331,7 @@ class JarvisTUI(App):
                 status.acao_atual = "Lendo print da tela..."
                 imagem_endereco = await asyncio.to_thread(pega_print)
                 if imagem_endereco is None:
-                    log.write("[bold red]⚠️ Nenhuma print encontrada na pasta.[/bold red]")
+                    self.escrever_log("[bold red]⚠️ Nenhuma print encontrada na pasta.[/bold red]")
                     entrada.disabled = False
                     entrada.focus()
                     return
@@ -326,7 +343,7 @@ class JarvisTUI(App):
                 conteudo_imagem, origem = await asyncio.to_thread(analisar_imagem, imagem_endereco, extensao,
                                                                   img_base64)
                 if origem == "erro":
-                    log.write(f"[bold red]❌ Erro na visão: {conteudo_imagem}[/bold red]")
+                    self.escrever_log(f"[bold red]❌ Erro na visão: {conteudo_imagem}[/bold red]")
                     entrada.disabled = False
                     entrada.focus()
                     return
@@ -339,7 +356,7 @@ class JarvisTUI(App):
 
 
             else:
-                log.write(f"[bold red]⚠️ Comando inválido.[/bold red]")
+                self.escrever_log(f"[bold red]⚠️ Comando inválido.[/bold red]")
                 entrada.disabled = False
                 entrada.focus()
                 return
@@ -381,7 +398,7 @@ class JarvisTUI(App):
         log.write(f"[bold green]Adomo[/bold green] [dim]({hora})[/dim]:")
         if houve_erro:
             log.write(resposta)
-            self._transcript_texto += f"Adomo ({hora}) [erro]: {re.sub(r'\\[/?[^\\[\\]]+\\]', '', resposta)}\n\n"
+            self._transcript_texto += f"Adomo ({hora}) [erro]: {markup_para_texto_plano(resposta)}\n\n"
         else:
             resposta_limpa = re.sub(r"<br\s*/?>", "\n", resposta, flags=re.IGNORECASE)
             resposta_limpa = latex_para_unicode(resposta_limpa)
@@ -433,7 +450,7 @@ class JarvisTUI(App):
         if hasattr(self, "motor"):
             self.motor.cancelar()
             log = self.query_one("#log", RichLog)
-            log.write("[dim italic]Cancelamento solicitado — parando assim que possível...[/dim italic]")
+            self.escrever_log("[dim italic]Cancelamento solicitado — parando assim que possível...[/dim italic]")
 
     def action_alternar_modo(self) -> None:
         status = self.query_one("#status", PainelStatus)
