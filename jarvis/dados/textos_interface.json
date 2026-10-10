@@ -1,0 +1,49 @@
+{
+  "frases_evento": {
+    "interpretando_comando": "Interpretando o que você quer...",
+    "buscando_memoria": "Vasculhando a memória...",
+    "memoria_nao_encontrada": "Nada na memória sobre isso...",
+    "memoria_encontrada": "Achei algo na memória!",
+    "comprimindo_memoria": "Resumindo o que achei...",
+    "pensando": "Pensando (ou fingindo que penso)...",
+    "fallback_local": "Groq deu pau, chamando o cérebro local...",
+    "erro_nuvem": "Deu ruim na nuvem...",
+    "acionando_ferramentas": "Executando ferramenta(s)...",
+    "recebendo_confirmacao_final": "Fechando a resposta...",
+    "repescagem_iniciada": "Não achei de cara, garimpando memória antiga...",
+    "repescagem_encontrada": "Achei algo na garimpagem!",
+    "repescagem_vazia": "Nada encontrado nem na garimpagem...",
+    "resposta_pronta": "Resposta pronta!",
+    "cancelado": "Cancelado pelo usuário."
+  },
+  "frases_ferramenta": {
+    "adicionar_multiplos_eventos": "Criando evento(s) na agenda...",
+    "apagar_eventos_por_termo": "Apagando evento(s) da agenda...",
+    "editar_evento_por_termo": "Editando evento na agenda...",
+    "listar_proximos_eventos": "Consultando a agenda...",
+    "mover_mouse": "Movendo o mouse...",
+    "clicar": "Clicando na tela...",
+    "digitar_texto": "Digitando no teclado...",
+    "pressionar_tecla": "Apertando uma tecla...",
+    "tirar_screenshot": "Tirando um print da tela...",
+    "enviar_texto_e_enter": "Enviando texto e apertando Enter...",
+    "deletar_arquivo": "Mexendo pra deletar um arquivo...",
+    "instalar_pacote": "Instalando um pacote...",
+    "fechar_janela_ativa": "Fechando a janela em foco...",
+    "criar_arquivo": "Criando arquivo...",
+    "abrir_programa": "Abrindo programa...",
+    "abrir_url": "Abrindo o site...",
+    "localizar_na_tela": "Procurando o elemento na tela...",
+    "posicao_mouse_atual": "Conferindo onde o mouse está...",
+    "ler_arquivo": "Lendo o arquivo...",
+    "listar_arquivos": "Conferindo o que já existe na pasta...",
+    "pesquisar_na_web": "Pesquisando na web..."
+  },
+  "frases_pensando": [
+    "Pensando (ou fingindo que penso)...",
+    "Consultando os astros digitais...",
+    "Processando sua ideia genial...",
+    "Deixa eu ver aqui...",
+    "Calculando a resposta certa (ou a mais engraçada)..."
+  ]
+}
