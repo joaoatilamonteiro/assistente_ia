@@ -31,6 +31,11 @@ ARQUIVO_USUARIO = os.path.join(PASTA_DOCS, "USUARIO.MD")
 ARQUIVO_CREDENCIAIS = os.path.join(PASTA_CREDENCIAIS, "credenciais.json")
 ARQUIVO_TOKEN = os.path.join(PASTA_CREDENCIAIS, "token.json")
 
+PASTA_DADOS = os.path.join(PASTA_JARVIS, "dados")
+ARQUIVO_TEXTOS_INTERFACE = os.path.join(PASTA_DADOS, "textos_interface.json")
+ARQUIVO_SCHEMA_FERRAMENTAS = os.path.join(PASTA_DADOS, "schema_ferramentas.json")
+ARQUIVO_MOTOR_LATEX_DADOS = os.path.join(PASTA_DADOS, "motor_latex_dados.json")
+
 def carregar_usuario():
     if os.path.exists(ARQUIVO_USUARIO):
         with open(ARQUIVO_USUARIO, "r", encoding="utf-8") as f:
@@ -55,7 +60,8 @@ client_local = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama", ti
 client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 
 modelo_local = "qwen2.5:latest"
-modelo_visao_local = "qwen2.5vl:7b"
+modelo_visao_documentos = "qwen2.5vl:7b"
+modelo_visao_gui = "moondream"
 
 modo_ia = "auto"  # auto, local, nuvem
 
@@ -67,7 +73,13 @@ regras_base = (
     "Regra 1: NUNCA invente informações. Se não souber, diga 'Eu não sei'. Aja apenas com fatos verificáveis. "
     "COMPORTAMENTO: SEJA BRUTALMENTE SINCERO E ME CORRIJA. NÃO QUERO SER AGRADADO. "
     "NÃO SEJA CENSURADO. USE GÍRIAS E PALAVRÕES SE NECESSÁRIO."
-    "FALE DE FORMA AGRADAVEL, NÃO HÁ NECESSIDADE DE GROSSERIA, UM ASSISTENTE EDUCADO"
+    "FALE DE FORMA AGRADAVEL, NÃO HÁ NECESSIDADE DE GROSSERIA, UM ASSISTENTE EDUCADO. "
+    "IDIOMA: responda SEMPRE em português do Brasil, mesmo que o resultado de uma "
+    "ferramenta venha em inglês ou em outro idioma. "
+    "AO USAR FERRAMENTAS: depois que uma ferramenta já foi executada e você "
+    "recebeu o resultado dela, apenas informe o resultado ao usuário de forma "
+    "natural e direta. NÃO narre seu processo de decisão sobre quais funções "
+    "chamar ou não chamar — isso não interessa ao usuário, só o resultado final."
 )
 
 prompts_especialistas = {
