@@ -1,157 +1,17 @@
 import re
+import json
+from jarvis.config import  ARQUIVO_MOTOR_LATEX_DADOS
 
-import math
+with open(ARQUIVO_MOTOR_LATEX_DADOS, "r", encoding="utf-8") as _f:
+    _dados = json.load(_f)
 
-_SUPER = {
-    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶",
-    "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
-    "a": "ᵃ", "b": "ᵇ", "c": "ᶜ", "d": "ᵈ", "e": "ᵉ", "f": "ᶠ", "g": "ᵍ",
-    "h": "ʰ", "i": "ⁱ", "j": "ʲ", "k": "ᵏ", "l": "ˡ", "m": "ᵐ", "n": "ⁿ",
-    "o": "ᵒ", "p": "ᵖ", "r": "ʳ", "s": "ˢ", "t": "ᵗ", "u": "ᵘ", "v": "ᵛ",
-    "w": "ʷ", "x": "ˣ", "y": "ʸ", "z": "ᶻ",
-}
-
-_SUB = {
-    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆",
-    "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
-    "a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ", "k": "ₖ", "l": "ₗ",
-    "m": "ₘ", "n": "ₙ", "o": "ₒ", "p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ",
-    "u": "ᵤ", "v": "ᵥ", "x": "ₓ",
-}
-
-_GREGO = {
-    r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\delta": "δ",
-    r"\varepsilon": "ε", r"\epsilon": "ε", r"\zeta": "ζ", r"\eta": "η",
-    r"\vartheta": "ϑ", r"\theta": "θ", r"\iota": "ι", r"\kappa": "κ",
-    r"\lambda": "λ", r"\mu": "μ", r"\nu": "ν", r"\xi": "ξ", r"\pi": "π",
-    r"\rho": "ρ", r"\sigma": "σ", r"\tau": "τ", r"\upsilon": "υ",
-    r"\varphi": "φ", r"\phi": "φ", r"\chi": "χ", r"\psi": "ψ", r"\omega": "ω",
-    r"\Gamma": "Γ", r"\Delta": "Δ", r"\Theta": "Θ", r"\Lambda": "Λ",
-    r"\Xi": "Ξ", r"\Pi": "Π", r"\Sigma": "Σ", r"\Upsilon": "Υ",
-    r"\Phi": "Φ", r"\Psi": "Ψ", r"\Omega": "Ω",
-}
-
-_SIMBOLOS = {
-    # Setas
-    r"\leftrightarrow": "↔",
-    r"\Leftrightarrow": "⇔",
-    r"\rightarrow": "→",
-    r"\Rightarrow": "⇒",
-    r"\longrightarrow": "⟶",
-    r"\Longrightarrow": "⟹",
-    r"\leftarrow": "←",
-    r"\Leftarrow": "⇐",
-    r"\longleftarrow": "⟵",
-    r"\Longleftarrow": "⟸",
-    r"\longleftrightarrow": "⟷",
-    r"\Longleftrightarrow": "⟺",
-    r"\to": "→",
-    r"\implies": "⟹",
-    r"\iff": "⟺",
-
-    # Operadores aritméticos
-    r"\times": "×",
-    r"\cdot": "·",
-    r"\div": "÷",
-    r"\pm": "±",
-    r"\mp": "∓",
-
-    # Comparação
-    r"\leq": "≤",
-    r"\le": "≤",
-    r"\geq": "≥",
-    r"\ge": "≥",
-    r"\neq": "≠",
-    r"\ne": "≠",
-    r"\approx": "≈",
-    r"\equiv": "≡",
-    r"\cong": "≅",
-    r"\sim": "∼",
-    r"\propto": "∝",
-
-    # Cálculo / análise
-    r"\infty": "∞",
-    r"\partial": "∂",
-    r"\nabla": "∇",
-    r"\sum": "∑",
-    r"\prod": "∏",
-    r"\oint": "∮",
-    r"\int": "∫",
-
-    # Teoria dos conjuntos
-    r"\subseteq": "⊆",
-    r"\supseteq": "⊇",
-    r"\subsetneq": "⊊",
-    r"\supsetneq": "⊋",
-    r"\subset": "⊂",
-    r"\supset": "⊃",
-    r"\cup": "∪",
-    r"\cap": "∩",
-    r"\bigcup": "⋃",
-    r"\bigcap": "⋂",
-    r"\setminus": "∖",
-    r"\emptyset": "∅",
-    r"\varnothing": "∅",
-    r"\in": "∈",
-    r"\notin": "∉",
-    r"\ni": "∋",
-
-    # Lógica
-    r"\forall": "∀",
-    r"\exists": "∃",
-    r"\nexists": "∄",
-    r"\lnot": "¬",
-    r"\neg": "¬",
-    r"\land": "∧",
-    r"\lor": "∨",
-    r"\wedge": "∧",
-    r"\vee": "∨",
-    r"\therefore": "∴",
-    r"\because": "∵",
-
-    # Reticências / pontuação matemática
-    r"\ldots": "…",
-    r"\cdots": "⋯",
-    r"\vdots": "⋮",
-    r"\ddots": "⋱",
-
-    # Conjuntos numéricos (\mathbb)
-    r"\mathbb{N}": "ℕ",
-    r"\mathbbN": "ℕ",
-    r"\mathbb{Z}": "ℤ",
-    r"\mathbbZ": "ℤ",
-    r"\mathbb{Q}": "ℚ",
-    r"\mathbbQ": "ℚ",
-    r"\mathbb{R}": "ℝ",
-    r"\mathbbR": "ℝ",
-    r"\mathbb{C}": "ℂ",
-    r"\mathbbC": "ℂ",
-
-    # Geometria / diversos
-    r"\degree": "°",
-    r"\perp": "⊥",
-    r"\parallel": "∥",
-    r"\angle": "∠",
-    r"\triangle": "△",
-    r"\otimes": "⊗",
-    r"\oplus": "⊕",
-}
-
-_COMANDOS_MUDOS = [
-    r"\left", r"\right", r"\displaystyle", r"\textstyle",
-    r"\,", r"\;", r"\!", r"\:", r"\quad", r"\qquad", r"\limits"
-]
-
-# comandos de "nome de função" do LaTeX (\lim, \sin, \log...) - só tiram a barra
-_FUNCOES = [
-    "lim", "sin", "cos", "tan", "sec", "csc", "cot",
-    "arcsin", "arccos", "arctan",
-    "log", "ln", "exp",
-    "max", "min", "sup", "inf", "det", "gcd", "arg", "mod",
-]
-# comandos que só "envolvem" o conteúdo (\text{x}, \mathcal{F}...) - mantém só o argumento
-_ENVOLVENTES = ["text", "mathrm", "mathbf", "mathcal", "mathit", "boldsymbol", "operatorname", "boxed"]
-
+_SUPER = _dados["super"]
+_SUB = _dados["sub"]
+_GREGO = _dados["grego"]
+_SIMBOLOS = _dados["simbolos"]
+_COMANDOS_MUDOS = _dados["comandos_mudos"]
+_FUNCOES = _dados["funcoes"]
+_ENVOLVENTES = _dados["envolventes"]
 # placeholders pra proteger \{ e \} (chaves de conjunto, tipo \{1,2,3\}) da limpeza
 # de chaves de agrupamento do latex (\frac{...}, \sqrt{...}) que roda no final
 _MARCA_LBRACE = "\x00LBRACE\x00"
