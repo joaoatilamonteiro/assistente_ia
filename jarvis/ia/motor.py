@@ -1,7 +1,7 @@
 import json
 import time
 from datetime import datetime
-
+import threading
 from jarvis.config import (
     client_local, client, modelo_local, regras_base,
     prompts_especialistas, carregar_capacidades_ia,carregar_usuario
@@ -9,7 +9,6 @@ from jarvis.config import (
 from jarvis.utils.texto import monta_historico_slim, parece_recusa
 from jarvis.utils.motor_latex import latex_para_unicode
 from jarvis.ia.roteador import interpreta_comando_rapido, comprime_memoria
-from jarvis.ia.ferramentas import ferramentas_jarvis
 from jarvis.integracoes.controle_pc import executar_acao_pc, ferramentas_controle_pc, NOMES_ACOES_PC
 from jarvis.memoria.embeddings import gerar_embedding, buscar_memoria_semantica
 from jarvis.memoria.persistencia import carregar_historico, salvar_historico
@@ -18,7 +17,10 @@ from jarvis.integracoes.google_calendar import (
     editar_evento_por_termo, listar_proximos_eventos,
 )
 from jarvis.web.pesquisa_web import pesquisa_web
+from jarvis.config import ARQUIVO_SCHEMA_FERRAMENTAS
 
+with open(ARQUIVO_SCHEMA_FERRAMENTAS, "r", encoding="utf-8") as _f:
+    ferramentas_jarvis = json.load(_f)["ferramentas_jarvis"]
 ferramentas = ferramentas_jarvis + ferramentas_controle_pc
 
 modelo_nuvem = "openai/gpt-oss-120b"
@@ -48,11 +50,14 @@ class motor_pensamento:
         self.usuario = carregar_usuario()
         self._on_evento = on_evento or (lambda tipo, **kw: None)
         self._on_texto = on_texto or (lambda pedaco: None)
-
+        self._cancelar_evento = threading.Event()  # <- novo
         self._confirmar_pc = confirmar_pc
 
     def esquecer_memoria_curta(self):
         self.memoria_curto_p = ""
+
+    def cancelar(self):
+        self._cancelar_evento.set()
 
     def definir_modo(self, modo):
         if modo in ("auto", "local", "nuvem"):
@@ -61,6 +66,8 @@ class motor_pensamento:
         return False
 
     def processar(self, pergunta, ignora_intencao=False, intencao_forcada=None):
+        self._cancelar_evento.clear()  # <- novo, primeira linha
+
         t_inicio = time.time()
 
         intencao = intencao_forcada or {"comando": "normal", "especialidade": "geral"}
@@ -156,6 +163,11 @@ class motor_pensamento:
                 except Exception as erro_local:
                     self.historico.pop()
                     raise erro_local
+            if "tool call validation failed" in erro_str.lower():
+                self._emit("erro_ferramenta", erro=erro_str)
+                self.historico.pop()
+                return "Tentei usar uma ferramenta mas montei o pedido errado. Pode repetir a pergunta?"
+
             self._emit("erro_nuvem", erro=erro_str)
             self.historico.pop()
             raise
@@ -210,6 +222,8 @@ class motor_pensamento:
             max_completion_tokens=2000,
             top_p=1,
             stream=True,
+            reasoning_format="parsed",
+            reasoning_effort="low"
         )
         resposta, ferramentas_acionadas = self.consumir_stream(completion)
         if ferramentas_acionadas:
@@ -236,6 +250,9 @@ class motor_pensamento:
         resposta = ""
         ferramentas_acionadas = {}
         for chunk in completion:
+            if self._cancelar_evento.is_set():
+                self._emit("cancelado")
+                break
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -283,6 +300,9 @@ class motor_pensamento:
 
         contagem_nomes_total = {}
         while ferramentas_acionadas and rodada <max_rodada:
+            if self._cancelar_evento.is_set():
+                self._emit("cancelado")
+                return "Cancelado pelo usuário."
             rodada+=1
             self._emit("acionando_ferramentas", ferramentas=[f["name"] for f in ferramentas_acionadas.values()])
 
@@ -299,6 +319,7 @@ class motor_pensamento:
                 ],
             })
 
+            resultados_desta_rodada = []
             for tc in ferramentas_acionadas.values():
                 resultado = self.executar_ferramenta(tc["name"], tc["arguments"])
                 self._emit("ferramenta_executada", nome=tc["name"], resultado=str(resultado))
@@ -307,6 +328,7 @@ class motor_pensamento:
                 if contagem_nomes_total[tc["name"]] > 1:
                     self._emit("ferramenta_repetida", nome=tc["name"], vezes=contagem_nomes_total[tc["name"]])
 
+                resultados_desta_rodada.append(str(resultado))
                 info_api.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -319,14 +341,20 @@ class motor_pensamento:
                           tools=ferramentas, tool_choice = "auto",stream=True)
             if client_usado is client:
                 kwargs["max_completion_tokens"] = 2000
+                kwargs["reasoning_format"] = "parsed"
+                kwargs["reasoning_effort"] = "low"
             else:
                 kwargs["timeout"] = 60.0
 
-            completion_final = client_usado.chat.completions.create(**kwargs)
-            resposta_final, ferramentas_acionadas = self.consumir_stream(completion_final)
-        return resposta_final or "Não consegui concluir a solicitação completa - muitas ações"
+            try:
+                completion_final = client_usado.chat.completions.create(**kwargs)
+                resposta_final, ferramentas_acionadas = self.consumir_stream(completion_final)
+            except Exception as erro_final:
 
-        # ----------------- persistência -----------------
+                self._emit("erro_nuvem", erro=str(erro_final))
+                return "\n".join(resultados_desta_rodada)
+
+        return resposta_final or "Não consegui concluir a solicitação completa - muitas ações"
 
     def salvar_resposta(self, pergunta, resposta_final):
         texto_vetorizar = f"Usuário: {pergunta} | IA: {resposta_final}"
