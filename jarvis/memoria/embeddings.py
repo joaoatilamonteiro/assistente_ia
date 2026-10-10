@@ -3,7 +3,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import os
 base_dir = os.path.dirname(os.path.abspath(__file__))
-caminho_modelo = os.path.join(base_dir,"jarvis", "memoria", "modelo_memoria")
+caminho_modelo = os.path.join(base_dir, "modelo_memoria")
 modelo_embedding = None
 try:
     modelo_embedding = SentenceTransformer(caminho_modelo)
