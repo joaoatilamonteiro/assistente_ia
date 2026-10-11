@@ -1,14 +1,22 @@
 # Ambiente
 .env
 venv/
+.venv/
 __pycache__/
 *.pyc
 
 # Dados sensíveis / gerados
-*.json
+!jarvis/dados/*.json
+data/
+debug_tokens.txt
+docs/USUARIO.MD
+modelo_memoria/
+
+# Build / release
+dist/
+build/
+*.spec
 
 # IDE
 .idea/
 capturas_xournal/
-jarvis/memoria/modelo_memoria/
-docs/USUARIO.MD
