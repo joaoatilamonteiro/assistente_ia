@@ -2,9 +2,10 @@
 import os
 import tempfile
 import webbrowser
+from jarvis.caminhos import PASTA_RECURSOS
 
 # template.html mora nesta mesma pasta (jarvis/web/)
-CAMINHO_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "template.html")
+CAMINHO_TEMPLATE = os.path.join(PASTA_RECURSOS, "jarvis", "web", "template.html")
 
 
 def renderizar_no_navegador(texto_da_ia):
