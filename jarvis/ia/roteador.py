@@ -3,6 +3,9 @@ import json
 
 from openai import OpenAI
 
+from jarvis.config import USAR_LOCAL, client
+import re
+
 client_roteador_local = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama", timeout=30.0)
 
 # Mesmo modelo usado na visão (qwen2.5vl:7b) - texto e visão no mesmo modelo.
@@ -20,6 +23,8 @@ _PALAVRAS_BUSCAR_MEMORIA = [
     "relembra", "relembrar", "antes", "anteriormente", "passado",
     "primeira mensagem", "primeiro assunto", "continuando", "continua de onde",
     "voltando naquele assunto", "já te falei", "ja te falei", "conversamos sobre",
+    "falando", "conversando", "aconteceu", "tava fazendo", "estava fazendo",
+    "estávamos", "estavamos"
 ]
 
 _PALAVRAS_MATEMATICA = [
@@ -43,6 +48,7 @@ _PALAVRAS_TRADUCAO = [
 # desiste e deixa o modelo local decidir.
 _LIMITE_PALAVRAS_MENSAGEM_CURTA = 12
 
+_RE_DATA = re.compile(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b")
 
 def _contem_alguma(frase_lower, palavras):
     return any(p in frase_lower for p in palavras)
@@ -55,6 +61,9 @@ def classificar_rapido(frase_usuario):
     ou None se a frase for ambígua/longa e precisar mesmo do roteador via IA.
     """
     frase_lower = frase_usuario.lower()
+
+    if _RE_DATA.search(frase_lower) and _contem_alguma(frase_lower, _PALAVRAS_BUSCAR_MEMORIA):
+        return {"comando": "buscar_memoria", "especialidade": "geral"}
 
     if _contem_alguma(frase_lower, _PALAVRAS_BUSCAR_MEMORIA):
         return {"comando": "buscar_memoria", "especialidade": "geral"}
@@ -83,6 +92,10 @@ def interpreta_comando_rapido(frase_usuario):
 
 
 def interpreta_comando(frase_usuario):
+    # Sem modelo local (Ollama) não há classificador de IA: segue como conversa normal.
+    if not USAR_LOCAL:
+        return {"comando": "normal", "especialidade": "geral"}
+
     prompt_sistema = """Você é um roteador de comandos e classificador de contexto de um sistema automatizado. 
             Sua única função é ler a frase do usuário e retornar APENAS um JSON válido. Não diga 'Olá', não explique nada.
 
@@ -154,19 +167,31 @@ def comprime_memoria(texto_bruto):
 
     try:
         print("🗜️ Espremendo os dados antigos...")
-        # Usando o client local (Qwen) já definido neste arquivo
-        resposta = client_roteador_local.chat.completions.create(
-            model=modelo_roteador_local,
-            messages=[
-                {"role": "system", "content": prompt_sistema},
-                {"role": "user", "content": f"HISTÓRICO:\n{texto_bruto}"}
-            ],
-            temperature=0.3,  # Baixa temperatura para ele não inventar nada
-            max_tokens=350
-        )
+        mensagens = [
+            {"role": "system", "content": prompt_sistema},
+            {"role": "user", "content": f"HISTÓRICO:\n{texto_bruto}"}
+        ]
+        if USAR_LOCAL:
+            # Usando o client local (Qwen) já definido neste arquivo
+            resposta = client_roteador_local.chat.completions.create(
+                model=modelo_roteador_local,
+                messages=mensagens,
+                temperature=0.3,  # Baixa temperatura para ele não inventar nada
+                max_tokens=350
+            )
+        else:
+            # Sem Ollama: comprime usando a nuvem (Groq)
+            resposta = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=mensagens,
+                temperature=0.3,
+                max_completion_tokens=1000,
+                reasoning_format="parsed",
+                reasoning_effort="low"
+            )
         return resposta.choices[0].message.content.strip()
 
     except Exception as e:
-        print(f"⚠️ Falha ao comprimir memória com o Qwen Local: {e}")
-        # Rota de escape: se a IA falhar, nós cortamos o texto na marreta para não crashar o sistema principal!
+        print(f"⚠️ Falha ao comprimir memória: {e}")
+        # Rota de escape: se a IA falhar, corta o texto para não crashar o sistema principal
         return texto_bruto[-1500:]

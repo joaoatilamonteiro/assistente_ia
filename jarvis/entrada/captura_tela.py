@@ -1,8 +1,13 @@
 from pathlib import Path
 
 
+
 def pega_print():
-    caminho_da_pasta = Path(r"C:\Users\monte\Pictures\Screenshots")
+    caminho_da_pasta = Path.home() / "Pictures" / "Screenshots"
+    if not caminho_da_pasta.is_dir():
+        print("pasta de prints não encontrada")
+        return None
+
     arquivos = [f for f in caminho_da_pasta.iterdir() if f.is_file()]
 
     if arquivos:

@@ -2,9 +2,13 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import os
-base_dir = os.path.dirname(os.path.abspath(__file__))
-caminho_modelo = os.path.join(base_dir, "modelo_memoria")
+from jarvis.caminhos import PASTA_APP
+import re
+
+caminho_modelo = os.path.join(PASTA_APP, "modelo_memoria")
+
 modelo_embedding = None
+
 try:
     modelo_embedding = SentenceTransformer(caminho_modelo)
     print("modelo carregado localmente com sucesso")
@@ -27,6 +31,26 @@ def cos_sim(a, b):
     a_np, b_np = np.array(a), np.array(b)
     return np.dot(a_np, b_np) / (np.linalg.norm(a_np) * np.linalg.norm(b_np))
 
+def buscar_por_data(pergunta, historico, max_chars_msg=600, max_total=6000):
+    """Se a pergunta tiver uma data (dd/mm ou dd/mm/aaaa), devolve as mensagens daquele dia."""
+    m = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", pergunta)
+    if not m:
+        return []
+    prefixo = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/"
+    if m.group(3):
+        ano = m.group(3)
+        prefixo += ano if len(ano) == 4 else "20" + ano
+
+    achadas, total = [], 0
+    for msg in historico:
+        if not (msg.get("data") or "").startswith(prefixo):
+            continue
+        conteudo = (msg.get("content") or "")[:max_chars_msg]
+        if total + len(conteudo) > max_total:
+            break
+        achadas.append({**msg, "content": conteudo})
+        total += len(conteudo)
+    return achadas
 
 def buscar_memoria_semantica(pergunta, historico, top_k=3):
 

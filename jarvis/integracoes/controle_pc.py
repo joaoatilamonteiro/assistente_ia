@@ -7,6 +7,9 @@ import time
 import inspect
 import webbrowser
 import json
+import shutil
+import sys
+from jarvis.caminhos import FROZEN
 from jarvis.config import ARQUIVO_SCHEMA_FERRAMENTAS
 from jarvis.ia.visao import analisar_imagem
 from jarvis.memoria.embeddings import fatiar_e_buscar_documento
@@ -98,6 +101,16 @@ def _eh_provavel_executavel(caminho_nome):
 
 def _processo_esta_rodando(nome_processo):
     #verifica pelo tasklist (windows) se ja ta rodando o processo, se nao ver o processo ele tenta dnv
+    if sys.platform != "win32":
+        # Linux/macOS: pgrep faz o papel do tasklist
+        try:
+            resultado = subprocess.run(
+                ["pgrep", "-x", nome_processo],
+                capture_output=True, text=True, timeout=5,
+            )
+            return resultado.returncode == 0
+        except Exception:
+            return False
     if not nome_processo.lower().endswith(".exe"):
         nome_processo += ".exe"
     try:
@@ -117,7 +130,12 @@ def abrir_programa(caminho_nome):
                      f"necessário abrir de novo — não chame esta ferramenta "
                      f"outra vez para o mesmo programa.")
     try:
-        os.startfile(caminho_nome)
+        if sys.platform == "win32":
+            os.startfile(caminho_nome)
+        elif shutil.which(caminho_nome):
+            subprocess.Popen([caminho_nome])
+        else:
+            subprocess.Popen(["xdg-open", caminho_nome])
         return f"Programa/arquivo aberto com sucesso: {caminho_nome}. Ação concluída"
     except FileNotFoundError:
         try:
@@ -278,6 +296,8 @@ def instalar_pacote(nome_pacote, gerenciador="pip"):
         "winget": ["winget", "install", nome_pacote],
         "choco": ["choco", "install", nome_pacote, "-y"],
     }
+    if FROZEN:
+        comandos.pop("pip", None)  # o executável não tem um Python/pip para instalar pacotes
     comando = comandos.get(gerenciador)
     if not comando:
         return f"Gerenciador desconhecido: {gerenciador}. Use 'pip', 'winget' ou 'choco'."

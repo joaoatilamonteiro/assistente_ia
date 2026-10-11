@@ -1,11 +1,12 @@
 import asyncio
 import base64
 import os
+import sys
 import random
 from datetime import datetime
 import ctypes
 import json
-from jarvis.config import ARQUIVO_TEXTOS_INTERFACE
+from jarvis.config import ARQUIVO_TEXTOS_INTERFACE, USAR_LOCAL
 
 
 import PyPDF2
@@ -55,7 +56,7 @@ def markup_para_texto_plano(markup: str) -> str:
 class PainelStatus(Static):
     """Barra lateral estilo ncspot: modo atual, latência, contador de mensagens."""
 
-    modo = reactive("auto")
+    modo = reactive("auto" if USAR_LOCAL else "nuvem")
     ultima_latencia = reactive("—")
     total_mensagens = reactive(0)
     acao_atual = reactive("Aguardando...")
@@ -214,17 +215,36 @@ class JarvisTUI(App):
         bloqueando essa thread até o usuário clicar Sim ou Não.
         Como é uma janela do próprio Windows, sempre responde a mouse/teclado,
         sem depender do event loop da TUI."""
-        MB_YESNO = 0x04
-        MB_ICONWARNING = 0x30
-        MB_TOPMOST = 0x40000  # garante que a janela aparece na frente de tudo
-
         texto = f"{descricao}\n\nAutorizar essa ação?"
-        resultado = ctypes.windll.user32.MessageBoxW(
-            0, texto, f"🔒 Confirmação necessária — {categoria.upper()}",
-            MB_YESNO | MB_ICONWARNING | MB_TOPMOST,
-        )
-        IDYES = 6
-        return resultado == IDYES
+
+        if sys.platform == "win32":
+            MB_YESNO = 0x04
+            MB_ICONWARNING = 0x30
+            MB_TOPMOST = 0x40000  # garante que a janela aparece na frente de tudo
+
+            resultado = ctypes.windll.user32.MessageBoxW(
+                0, texto, f"🔒 Confirmação necessária — {categoria.upper()}",
+                MB_YESNO | MB_ICONWARNING | MB_TOPMOST,
+            )
+            IDYES = 6
+            return resultado == IDYES
+
+        # Linux/macOS: caixa de diálogo do tkinter (no Linux precisa do pacote python3-tk)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            raiz = tk.Tk()
+            raiz.withdraw()
+            raiz.attributes("-topmost", True)
+            resposta = messagebox.askyesno(
+                f"Confirmação necessária — {categoria.upper()}", texto, parent=raiz
+            )
+            raiz.destroy()
+            return bool(resposta)
+        except Exception:
+            # Sem como perguntar com segurança, a ação é negada.
+            return False
 
 
     def escrever_log(self, markup: str) -> None:
@@ -280,8 +300,6 @@ class JarvisTUI(App):
 
         seletor = self.query_one("#log-select", LogSelecionavel)
         if seletor.styles.display != "none":
-            # Estava no modo seleção - volta pro log normal antes de mandar,
-            # senão a resposta nova fica escondida atrás do TextArea.
             seletor.styles.display = "none"
             log.styles.display = "block"
 
@@ -308,12 +326,13 @@ class JarvisTUI(App):
                 return
 
             elif comando == "modo":
-                if argumento in ["auto", "local", "nuvem"]:
+                modos_validos = ["auto", "local", "nuvem"] if USAR_LOCAL else ["nuvem"]
+                if argumento in modos_validos:
                     self.motor.definir_modo(argumento)
                     status.modo = argumento
                     self.escrever_log(f"[dim italic]({hora}) ⚙️ Modo alterado para: {argumento}[/dim italic]")
                 else:
-                    self.escrever_log("[bold red]⚠️ Uso: \\modo auto | local | nuvem[/bold red]")
+                    self.escrever_log(f"[bold red]⚠️ Uso: \\modo {' | '.join(modos_validos)}[/bold red]")
                 entrada.disabled = False
                 entrada.focus()
                 return
@@ -360,7 +379,6 @@ class JarvisTUI(App):
                 entrada.disabled = False
                 entrada.focus()
                 return
-        # ---------------------------------------------
 
         log.write(f"[bold blue]Você[/bold blue] [dim]({hora})[/dim]: {pergunta}")
         self._transcript_texto += f"Você ({hora}): {pergunta}\n\n"
@@ -402,6 +420,7 @@ class JarvisTUI(App):
         else:
             resposta_limpa = re.sub(r"<br\s*/?>", "\n", resposta, flags=re.IGNORECASE)
             resposta_limpa = latex_para_unicode(resposta_limpa)
+            resposta_limpa = re.sub(r"^(\s*\d+)([.)])\s*$", r"\1\\\2", resposta_limpa)
             log.write(Markdown(resposta_limpa))
             self._ultima_resposta_texto = resposta_limpa  # disponível pro Ctrl+Y
             self._transcript_texto += f"Adomo ({hora}): {resposta_limpa}\n\n"
@@ -454,7 +473,7 @@ class JarvisTUI(App):
 
     def action_alternar_modo(self) -> None:
         status = self.query_one("#status", PainelStatus)
-        ordem = ["auto", "local", "nuvem"]
+        ordem = ["auto", "local", "nuvem"] if USAR_LOCAL else ["nuvem"]
         novo_modo = ordem[(ordem.index(status.modo)+1)% len(ordem)]
         status.modo = novo_modo
         self.motor.definir_modo(novo_modo)
