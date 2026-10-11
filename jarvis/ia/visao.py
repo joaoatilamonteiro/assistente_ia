@@ -1,6 +1,6 @@
 import mimetypes
 
-from jarvis.config import client_local, client, modelo_visao_documentos
+from jarvis.config import client_local, client, modelo_visao_documentos, USAR_LOCAL
 from jarvis.utils.animacao import LoadingAnimado
 from jarvis.utils.texto import verifica_qualidade_resposta
 
@@ -17,38 +17,39 @@ def analisar_imagem(caminho_arquivo, extensao, img_base64, prompt = None, timeou
     conteudo_imagem = None
 
     # --- TENTATIVA 1: Local (Ollama) ---
-    loading = LoadingAnimado("👁️ Ollama local analisando a imagem")
-    loading.iniciar()
-    try:
-        resposta_visao = client_local.chat.completions.create(
-            model=modelo_local or modelo_visao_documentos,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_visao},
-                        {"type": "image_url", "image_url": {"url": data_url}}
-                    ]
-                }
-            ],
-            temperature=0.1,
-            max_tokens= max_tokens,
-            timeout=timeout_local
-        )
-        conteudo_imagem = resposta_visao.choices[0].message.content
-    except Exception as erro_local_visao:
-        loading.parar()
-        print(f"⚠️ Falha na visão local (Ollama), erro: {erro_local_visao}\n🔄 Acionando fallback pra nuvem...")
-        conteudo_imagem = None
-    else:
-        loading.parar()
-        if verifica_qualidade_resposta(conteudo_imagem):
-            print(
-                "⚠️ A visão local (Ollama) não aguentou e devolveu uma resposta corrompida.\n🔄 Acionando fallback pra nuvem...")
+    if USAR_LOCAL:
+        loading = LoadingAnimado("👁️ Ollama local analisando a imagem")
+        loading.iniciar()
+        try:
+            resposta_visao = client_local.chat.completions.create(
+                model=modelo_local or modelo_visao_documentos,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_visao},
+                            {"type": "image_url", "image_url": {"url": data_url}}
+                        ]
+                    }
+                ],
+                temperature=0.1,
+                max_tokens= max_tokens,
+                timeout=timeout_local
+            )
+            conteudo_imagem = resposta_visao.choices[0].message.content
+        except Exception as erro_local_visao:
+            loading.parar()
+            print(f"⚠️ Falha na visão local (Ollama), erro: {erro_local_visao}\n🔄 Acionando fallback pra nuvem...")
             conteudo_imagem = None
         else:
-            print("✅ Imagem lida localmente via Ollama!")
-            return conteudo_imagem, "local"
+            loading.parar()
+            if verifica_qualidade_resposta(conteudo_imagem):
+                print(
+                    "⚠️ A visão local (Ollama) não aguentou e devolveu uma resposta corrompida.\n🔄 Acionando fallback pra nuvem...")
+                conteudo_imagem = None
+            else:
+                print("✅ Imagem lida localmente via Ollama!")
+                return conteudo_imagem, "local"
 
     # --- TENTATIVA 2: Nuvem (Groq - qwen/qwen3.6-27b) ---
     loading = LoadingAnimado("☁️ Analisando imagem na nuvem")
