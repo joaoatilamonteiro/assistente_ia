@@ -4,28 +4,22 @@ def estimar_tokens(texto):
     return max(1, len(texto or "") // 4)
 
 
-def monta_historico_slim(historico, orcamento_token=6000, min_msg=4):
-    if len(historico) <= min_msg:
-        return historico
-
-    base = historico[:2]
-    tokens_base = sum(estimar_tokens(m.get("content", "")) for m in base)
-
-    selecionados_proxs = []
-    tokens_usados = tokens_base
-
-    for msg in reversed(historico[2:]):
-        custo = estimar_tokens(msg.get("content", ""))
-
-        if tokens_usados + custo > orcamento_token and len(selecionados_proxs) >= min_msg:
+def monta_historico_slim(historico, orcamento_token=1500, min_msg=2, max_chars_msg=1200):
+    selecionadas = []
+    usados = 0
+    for i, msg in enumerate(reversed(historico)):
+        conteudo = msg.get("content", "") or ""
+        # só corta mensagens antigas; a pergunta atual (i == 0) vai inteira
+        if i > 0 and len(conteudo) > max_chars_msg:
+            conteudo = conteudo[:max_chars_msg] + " [...cortado]"
+            msg = {**msg, "content": conteudo}
+        custo = estimar_tokens(conteudo)
+        if usados + custo > orcamento_token and len(selecionadas) >= min_msg:
             break
-
-        selecionados_proxs.append(msg)
-        tokens_usados += custo
-
-    selecionados_proxs.reverse()
-    return base + selecionados_proxs
-
+        selecionadas.append(msg)
+        usados += custo
+    selecionadas.reverse()
+    return selecionadas
 
 def verifica_qualidade_resposta(texto):
     if not texto or len(texto.strip()) < 3:
