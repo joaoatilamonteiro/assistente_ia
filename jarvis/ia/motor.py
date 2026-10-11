@@ -10,25 +10,37 @@ from jarvis.utils.texto import monta_historico_slim, parece_recusa
 from jarvis.utils.motor_latex import latex_para_unicode
 from jarvis.ia.roteador import interpreta_comando_rapido, comprime_memoria
 from jarvis.integracoes.controle_pc import executar_acao_pc, ferramentas_controle_pc, NOMES_ACOES_PC
-from jarvis.memoria.embeddings import gerar_embedding, buscar_memoria_semantica
+from jarvis.memoria.embeddings import gerar_embedding
+from jarvis.memoria.banco import buscar_contexto, registrar_turno, sincronizar_historico
+from jarvis.memoria.resumos import iniciar_resumos_em_segundo_plano
+
 from jarvis.memoria.persistencia import carregar_historico, salvar_historico
 from jarvis.integracoes.google_calendar import (
     adicionar_multiplos_eventos, apagar_eventos_por_termo,
     editar_evento_por_termo, listar_proximos_eventos,
 )
 from jarvis.web.pesquisa_web import pesquisa_web
-from jarvis.config import ARQUIVO_SCHEMA_FERRAMENTAS
+from jarvis.config import ARQUIVO_SCHEMA_FERRAMENTAS, USAR_LOCAL
+from jarvis.build_flags import USAR_RPA
+import re
 
 with open(ARQUIVO_SCHEMA_FERRAMENTAS, "r", encoding="utf-8") as _f:
     ferramentas_jarvis = json.load(_f)["ferramentas_jarvis"]
-ferramentas = ferramentas_jarvis + ferramentas_controle_pc
+
+ferramentas = ferramentas_jarvis + (ferramentas_controle_pc if USAR_RPA else [])
+
+PALAVRAS_PC = (
+    "abrir", "abre ", "clique", "clicar", "mouse", "tecla", "digite", "digitar",
+    "arquivo", "pasta", "tela", "print", "screenshot", "instal", "fechar",
+    "programa", "site", "url", "link",
+)
 
 modelo_nuvem = "openai/gpt-oss-120b"
 
 executores_ferramentas = {
     "adicionar_multiplos_eventos": lambda a: adicionar_multiplos_eventos(eventos=a.get("eventos", [])),
     "apagar_eventos_por_termo": lambda a: apagar_eventos_por_termo(termo_busca=a.get("termo_busca")),
-    "editar_eventos_por_termo": lambda a:editar_evento_por_termo(
+    "editar_evento_por_termo": lambda a:editar_evento_por_termo(
         termo_busca=a.get("termo_busca"),
         novo_resumo=a.get("novo_resumo"),
         nova_data_hora_inicio= a.get("nova_data_hora_inicio"),
@@ -43,9 +55,12 @@ executores_ferramentas = {
 
 class motor_pensamento:
     def __init__(self, on_evento=None, on_texto=None, confirmar_pc = None):
+        self._ferramentas_atuais = ferramentas_jarvis
         self.historico = carregar_historico()
+        sincronizar_historico(self.historico)
+        iniciar_resumos_em_segundo_plano()
         self.memoria_curto_p = ""
-        self.modo_ia = "auto"  # auto, local, nuvem
+        self.modo_ia = "auto" if USAR_LOCAL else "nuvem"  # auto, local, nuvem
         self.capacidades_ia = carregar_capacidades_ia()
         self.usuario = carregar_usuario()
         self._on_evento = on_evento or (lambda tipo, **kw: None)
@@ -60,13 +75,20 @@ class motor_pensamento:
         self._cancelar_evento.set()
 
     def definir_modo(self, modo):
-        if modo in ("auto", "local", "nuvem"):
+        modos_validos = ("auto", "local", "nuvem") if USAR_LOCAL else ("nuvem",)
+        if modo in modos_validos:
             self.modo_ia = modo
             return True
         return False
 
+    def ferramentas_para(self, pergunta):
+        if USAR_RPA and any(p in pergunta.lower() for p in PALAVRAS_PC):
+            return ferramentas_jarvis + ferramentas_controle_pc
+        return ferramentas_jarvis
+
     def processar(self, pergunta, ignora_intencao=False, intencao_forcada=None):
-        self._cancelar_evento.clear()  # <- novo, primeira linha
+        self._cancelar_evento.clear()
+        self._ferramentas_atuais = self.ferramentas_para(pergunta)
 
         t_inicio = time.time()
 
@@ -86,8 +108,14 @@ class motor_pensamento:
         })
 
         # Orçamento de token pra caber histórico + resposta no limite da conta Groq
-        historico_enxuto = monta_historico_slim(self.historico, orcamento_token=2500)
+        def _lixo(m):
+            c = (m.get("content") or "").strip().lower().rstrip(".")
+            return m.get("role") == "assistant" and (
+                c == "eu não sei" or parece_recusa(c) or c.startswith("não consegui concluir")
+            )
 
+        historico_limpo = [m for m in self.historico if not _lixo(m)]
+        historico_enxuto = monta_historico_slim(historico_limpo, orcamento_token=1000)
         resposta_final = self.acorda_ia_repescagem(pergunta, historico_enxuto, intencao)
 
         resposta_formatada = latex_para_unicode(resposta_final)
@@ -104,32 +132,19 @@ class motor_pensamento:
             "intencao": intencao,
         }
 
+
+
         # ----------------- memória -----------------
 
     def busca_comprime_memoria(self, pergunta, formato_resgate):
         self._emit("buscando_memoria")
-        memoria_resgatada = buscar_memoria_semantica(pergunta, self.historico)
-        if not memoria_resgatada:
+        contexto = buscar_contexto(pergunta)
+        if not contexto:
             self._emit("memoria_nao_encontrada")
             return False
-
-        if formato_resgate:
-            bruto = "".join(
-                f"[{m.get('data', '')}] {m.get('role', '').upper()}: {m.get('content')}\n\n"
-                for m in memoria_resgatada
-            )
-        else:
-            bruto = "".join(
-                f"[{m.get('role', '').upper()}]: {m.get('content')}\n" for m in memoria_resgatada
-            )
-
-        self._emit("comprimindo_memoria")
-        contexto_comprimido = comprime_memoria(bruto)
-        self.memoria_curto_p = f"--- CONTEXTO RESGATADO ---\n{contexto_comprimido}\n--------------------------"
-        self._emit("memoria_encontrada", resumo=contexto_comprimido)
+        self.memoria_curto_p = f"--- CONTEXTO RESGATADO ---\n{contexto}\n--------------------------"
+        self._emit("memoria_encontrada", resumo=contexto)
         return True
-
-        # ----------------- chamada de IA -----------------
 
     def acorda_ia_repescagem(self, pergunta, historico_enxuto, intencao):
         resposta = self._acorda_ia(pergunta, historico_enxuto, intencao)
@@ -152,10 +167,10 @@ class motor_pensamento:
             return self.chamar_local(info_api)
 
         try:
-            return self.chamar_nuvem(info_api)
+            return self.chamar_nuvem_com_retry(info_api)
         except Exception as erro_groq:
             erro_str = str(erro_groq)
-            if self.modo_ia == "auto" and ("413" in erro_str or "429" in erro_str):
+            if USAR_LOCAL and self.modo_ia == "auto" and ("413" in erro_str or "429" in erro_str):
                 self._emit("fallback_local", motivo=erro_str)
                 info_local = self.montar_mensagens_fallback_local(info_api, pergunta, historico_enxuto)
                 try:
@@ -211,15 +226,40 @@ class motor_pensamento:
             info_local.append({"role": "user", "content": pergunta})
         return info_local
 
+    def _segundos_para_retry(self, erro):
+        erro = str(erro)
+        m = re.search(r"try again in ([\d.]+)(ms|s)", erro)
+        if "429" not in erro or not m:
+            return None
+        segundos = float(m.group(1)) / (1000 if m.group(2) == "ms" else 1)
+        return segundos + 0.5 if segundos <= 30 else None
+
+    def chamar_nuvem_com_retry(self, info_api, tentativas=2):
+        for i in range(tentativas + 1):
+            try:
+                return self.chamar_nuvem(info_api)
+            except Exception as e:
+                espera = self._segundos_para_retry(e)
+                if espera is not None and i < tentativas:
+                    time.sleep(espera)
+                    continue
+                raise
+
     def chamar_nuvem(self, info_api):
         self._emit("pensando", destino="nuvem")
+        '''with open("debug_tokens.txt", "a", encoding="utf-8") as _d:
+            _d.write(f"--- chamada | tools: {len(self._ferramentas_atuais)} "
+                     f"(~{len(json.dumps(self._ferramentas_atuais, ensure_ascii=False)) // 3} tok)\n")
+            for m in info_api:
+                _d.write(f"{m['role']}: ~{len(str(m.get('content') or '')) // 3} tok\n")'''
+
         completion = client.chat.completions.create(
             model=modelo_nuvem,
             messages=info_api,
             temperature=0.7,
-            tools=ferramentas,
+            tools=self._ferramentas_atuais,
             tool_choice="auto",
-            max_completion_tokens=2000,
+            max_completion_tokens=800,
             top_p=1,
             stream=True,
             reasoning_format="parsed",
@@ -236,7 +276,7 @@ class motor_pensamento:
             model=modelo_local,
             messages=info_api,
             temperature=0.7,
-            tools=ferramentas,
+            tools=self._ferramentas_atuais,
             tool_choice="auto",
             stream=True,
             timeout=60.0,
@@ -280,7 +320,7 @@ class motor_pensamento:
         except Exception as e:
             return f"erro ao interpretaro argumentos de {nome}: {e}"
 
-        if nome in NOMES_ACOES_PC:
+        if USAR_RPA and nome in NOMES_ACOES_PC:
             try:
                 if self._confirmar_pc:
                     return executar_acao_pc(nome, argumentos, confirmar=self._confirmar_pc)
@@ -338,9 +378,10 @@ class motor_pensamento:
 
             self._emit("recebendo_confirmacao_final")
             kwargs = dict(model=modelo_usado, messages=info_api, temperature=0.7,
-                          tools=ferramentas, tool_choice = "auto",stream=True)
+                          stream=True)
             if client_usado is client:
-                kwargs["max_completion_tokens"] = 2000
+                kwargs["max_completion_tokens"] = 800
+
                 kwargs["reasoning_format"] = "parsed"
                 kwargs["reasoning_effort"] = "low"
             else:
@@ -359,13 +400,15 @@ class motor_pensamento:
     def salvar_resposta(self, pergunta, resposta_final):
         texto_vetorizar = f"Usuário: {pergunta} | IA: {resposta_final}"
         embedding_resposta = gerar_embedding(texto_vetorizar)
+        agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         self.historico.append({
             "role": "assistant",
             "content": resposta_final,
-            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "data": agora,
             "embedding": embedding_resposta,
         })
         salvar_historico(self.historico)
+        registrar_turno(pergunta, resposta_final, agora, embedding_resposta)
 
         # ----------------- eventos -----------------
 
